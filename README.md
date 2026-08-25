@@ -81,6 +81,10 @@ document. [HTML
 preview](https://htmlpreview.github.io/?https://github.com/google/riscv-dv/blob/master/docs/build/singlehtml/index.html#document-index).
 You can find the prebuilt document under docs/build/singlehtml/index.html
 
+For the NanHu V5.1 target, see the Chinese
+[test generation guide](docs/NanHu-V5.1-test-generation-guide.md) and
+[architecture gap analysis](docs/NanHu-V5.1-riscv-dv-gap-analysis.md).
+
 ## External contributions and collaborations
 
 RISC-V DV is now contributed to CHIPS Alliance. We have regular meetings to

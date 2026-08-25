@@ -103,7 +103,8 @@
   rtl_test: core_base_test
 
 # Encoding and alternate-group unit regression. Keep it out of the default
-# smoke set; run explicitly with --iterations 1 when changing scalar ISA code.
+# smoke set. The runner filters zero-iteration entries before applying the CLI
+# override, so enable this in a copied testlist and run it with --steps gen.
 - test: nanhu_v5_1_scalar_encoding_unit
   iterations: 0
   no_iss: 1
@@ -337,8 +338,10 @@
     -mabi=lp64d
   rtl_test: core_base_test
 
-# Disabled address-map template. Replace these conventional ACLINT/PLIC
-# addresses with the integration's actual MMIO map before enabling it.
+# Disabled address-map template. The runner filters zero-iteration entries
+# before applying the CLI override, so enable this in a copied testlist after
+# replacing these conventional ACLINT/PLIC addresses with the integration's
+# actual MMIO map.
 - test: nanhu_v5_1_platform_interrupt_example
   description: >
     ACLINT initialization and PLIC claim/complete integration example.
