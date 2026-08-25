@@ -108,19 +108,26 @@ class riscv_instr extends uvm_object;
         continue;
       end
       if (!cfg.enable_sfence && instr_name == SFENCE_VMA) continue;
-      if (cfg.no_fence && (instr_name inside {FENCE, FENCE_I, SFENCE_VMA})) continue;
-      if ((instr_inst.group inside {supported_isa}) &&
+      if (cfg.no_fence && (instr_name inside {FENCE, FENCE_I, SFENCE_VMA,
+                                              SINVAL_VMA, SFENCE_W_INVAL,
+                                              SFENCE_INVAL_IR})) continue;
+      if (instr_inst.is_group_supported(cfg) &&
           !(cfg.disable_compressed_instr &&
-            (instr_inst.group inside {RV32C, RV64C, RV32DC, RV32FC, RV128C, RV32ZCB, RV64ZCB})) &&
+            (instr_inst.group inside {RV32C, RV64C, RV32DC, RV32FC, RV128C,
+                                      RV32ZCB, RV64ZCB, RV32ZCMOP, RV64ZCMOP})) &&
           !(!cfg.enable_floating_point &&
             (instr_inst.group inside {RV32F, RV64F, RV32D, RV64D})) &&
           !(!cfg.enable_vector_extension &&
-            (instr_inst.group inside {RVV})) &&
+            (instr_inst.group inside {RVV, ZVBB})) &&
           !(cfg.vector_instr_only &&
-            !(instr_inst.group inside {RVV}))
+            !(instr_inst.group inside {RVV, ZVBB}))
           ) begin
+        foreach (supported_isa[i]) begin
+          if (instr_inst.is_group_member(supported_isa[i])) begin
+            instr_group[supported_isa[i]].push_back(instr_name);
+          end
+        end
         instr_category[instr_inst.category].push_back(instr_name);
-        instr_group[instr_inst.group].push_back(instr_name);
         instr_names.push_back(instr_name);
       end
     end
@@ -129,6 +136,20 @@ class riscv_instr extends uvm_object;
 
   virtual function bit is_supported(riscv_instr_gen_config cfg);
     return 1;
+  endfunction
+
+  // Some ratified instructions are members of more than one named extension
+  // (for example ROL is in both Zbb and Zbkb). Derived classes describe all
+  // architectural memberships without duplicating the factory class.
+  virtual function bit is_group_member(riscv_instr_group_t query_group);
+    return query_group == group;
+  endfunction
+
+  virtual function bit is_group_supported(riscv_instr_gen_config cfg);
+    foreach (supported_isa[i]) begin
+      if (is_group_member(supported_isa[i])) return 1'b1;
+    end
+    return 1'b0;
   endfunction
 
   static function riscv_instr create_instr(riscv_instr_name_t instr_name);
@@ -170,7 +191,11 @@ class riscv_instr extends uvm_object;
     if (cfg.no_fence == 0) begin
       basic_instr = {basic_instr, instr_category[SYNCH]};
     end
-    if ((cfg.no_csr_instr == 0) && (cfg.init_privileged_mode == MACHINE_MODE)) begin
+    // Preserve the legacy M-mode default, while allowing explicit legal-all
+    // and invalid-privilege CSR tests to exercise CSR instructions in S/U.
+    if ((cfg.no_csr_instr == 0) &&
+        ((cfg.init_privileged_mode == MACHINE_MODE) ||
+         cfg.gen_all_csrs_by_default || cfg.enable_access_invalid_csr_level)) begin
       basic_instr = {basic_instr, instr_category[CSR]};
     end
     if (cfg.no_wfi == 0) begin

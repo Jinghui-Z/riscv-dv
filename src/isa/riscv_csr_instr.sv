@@ -92,6 +92,12 @@ class riscv_csr_instr extends riscv_instr;
     end else if (cfg.gen_all_csrs_by_default) begin
       allow_ro_write = cfg.gen_csr_ro_write;
       include_reg = {implemented_csr};
+      // In lower privilege modes, "all" means every architecturally
+      // accessible implemented CSR. Invalid-level accesses are selected by
+      // the dedicated enable_access_invalid_csr_level path above.
+      if (cfg.init_privileged_mode != MACHINE_MODE) begin
+        exclude_reg = {cfg.invalid_priv_mode_csrs};
+      end
       foreach (custom_csr[r]) begin
         default_include_csr_write.push_back(riscv_csr_t'(custom_csr[r]));
       end
@@ -106,6 +112,13 @@ class riscv_csr_instr extends riscv_instr;
       end else begin
         include_reg = {USCRATCH};
       end
+    end
+
+    // Debug CSRs are only accessible while the hart is in Debug Mode. The
+    // Debug ROM generator emits those accesses explicitly; ordinary legal CSR
+    // streams must not read them from M/S/U mode.
+    if (!cfg.enable_illegal_csr_instruction && !cfg.enable_access_invalid_csr_level) begin
+      exclude_reg = {exclude_reg, DCSR, DPC, DSCRATCH0, DSCRATCH1};
     end
   endfunction : create_csr_filter
 

@@ -336,7 +336,11 @@ class riscv_push_stack_instr extends riscv_rand_instr_stream;
       enable_branch = 0;
     end
     if(enable_branch) begin
-      branch_instr = riscv_instr::get_rand_instr(.include_category({BRANCH}));
+      // Helper control flow must remain available when vector_instr_only has
+      // filtered the random BRANCH category out of the payload instruction list.
+      branch_instr = riscv_instr::get_rand_instr(
+          .include_instr({BEQ, BNE, BLT, BGE, BLTU, BGEU}));
+      branch_instr.m_cfg = cfg;
       `DV_CHECK_RANDOMIZE_FATAL(branch_instr)
       branch_instr.imm_str = push_start_label;
       branch_instr.branch_assigned = 1'b1;

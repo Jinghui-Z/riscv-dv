@@ -788,7 +788,7 @@ def parse_args(cwd):
     parser.add_argument("--target", type=str, default="rv32imc",
                         help="Run the generator with pre-defined targets: \
                             rv32imc, rv32i, rv32imafdc, rv64imc, rv64gc, \
-                            rv64imafdc")
+                            rv64imafdc, nanhu_v5_1")
     parser.add_argument("-o", "--output", type=str,
                         help="Output directory name", dest="o")
     parser.add_argument("-tl", "--testlist", type=str, default="",
@@ -827,8 +827,8 @@ def parse_args(cwd):
                             command is not specified")
     parser.add_argument("--isa", type=str, default="",
                         help="RISC-V ISA subset")
-    parser.add_argument("--priv", type=str, default="m",
-                        help="RISC-V privilege modes enabled in simulation [su]")
+    parser.add_argument("--priv", type=str, default=None,
+                        help="RISC-V privilege modes enabled in simulation [msu]")
     parser.add_argument("-m", "--mabi", type=str, default="",
                         help="mabi used for compilation", dest="mabi")
     parser.add_argument("--gen_timeout", type=int, default=360,
@@ -985,6 +985,17 @@ def load_config(args, cwd):
         elif args.target == "rv64imafdc":
             args.mabi = "lp64"
             args.isa = "rv64imafdc_zicsr_zifencei"
+        elif args.target == "nanhu_v5_1":
+            if args.simulator == "pyflow":
+                sys.exit("nanhu_v5_1 is implemented by the SystemVerilog generator; "
+                         "the pyflow backend does not yet implement this target")
+            args.mabi = "lp64d"
+            if args.priv is None:
+                args.priv = "msu"
+            # The NanHu target enables additional extensions through its
+            # target settings and generator plusargs. Keep the runner ISA
+            # conservative so bundled ISS/toolchains can still parse it.
+            args.isa = "rv64imafdcv_zicsr_zifencei"
         else:
             sys.exit("Unsupported pre-defined target: {}".format(args.target))
     else:
@@ -996,6 +1007,9 @@ def load_config(args, cwd):
                         args.custom_target))
         if not args.testlist:
             args.testlist = args.custom_target + "/testlist.yaml"
+
+    if args.priv is None:
+        args.priv = "m"
 
 
 def main():

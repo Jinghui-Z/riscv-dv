@@ -17,6 +17,7 @@
 class riscv_page_table_exception_cfg extends uvm_object;
 
   bit enable_exception;
+  int svade_fault_mode;
 
   // Knobs for each type of exception
   rand bit allow_page_access_control_exception;
@@ -37,7 +38,15 @@ class riscv_page_table_exception_cfg extends uvm_object;
   int unsigned zero_dirty_fault_ratio      = 5;
 
   constraint exception_ratio_c {
-    if(enable_exception) {
+    if(enable_exception && (svade_fault_mode != 0)) {
+      allow_page_access_control_exception  == 0;
+      allow_superpage_misaligned_exception == 0;
+      allow_leaf_link_page_exception       == 0;
+      allow_invalid_page_exception         == 0;
+      allow_privileged_mode_exception      == 0;
+      allow_zero_access_bit_exception      == (svade_fault_mode == 1);
+      allow_zero_dirty_bit_exception       == (svade_fault_mode == 2);
+    } else if(enable_exception) {
       allow_page_access_control_exception  dist { 1 := page_access_fault_ratio,
                                                   0 := 100 - page_access_fault_ratio };
       allow_superpage_misaligned_exception dist { 1 := misaligned_superpage_ratio,
@@ -63,7 +72,10 @@ class riscv_page_table_exception_cfg extends uvm_object;
     }
   }
 
-  `uvm_object_utils(riscv_page_table_exception_cfg)
+  `uvm_object_utils_begin(riscv_page_table_exception_cfg)
+    `uvm_field_int(enable_exception, UVM_DEFAULT)
+    `uvm_field_int(svade_fault_mode, UVM_DEFAULT)
+  `uvm_object_utils_end
   `uvm_object_new
 
 endclass

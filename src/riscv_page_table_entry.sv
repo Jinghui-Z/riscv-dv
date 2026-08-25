@@ -17,10 +17,18 @@
 //--------------------------------------------------------------------------------------------
 // RISC-V Page Table Entry(PTE)
 //
-// Support SV32, SV39, SV48 PTE format defined in RISC-V privileged spec 1.10.
+// Support SV32, SV39, SV48 PTE format defined in RISC-V privileged spec 1.10,
+// with optional Svpbmt fields for RV64 PTEs.
 // -------------------------------------------------------------------------------------------
 
 class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
+
+  typedef enum bit [1:0] {
+    PTE_PBMT_PMA  = 2'b00,
+    PTE_PBMT_NC   = 2'b01,
+    PTE_PBMT_IO   = 2'b10,
+    PTE_PBMT_RSVD = 2'b11
+  } pte_pbmt_t;
 
   // Note that only SV32, SV39, SV48 are supported
   parameter int PPN0_WIDTH  = (MODE == SV32) ? 10 : 9;
@@ -47,6 +55,9 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
   rand bit [PPN3_WIDTH-1:0]   ppn3;
   rand bit [XLEN-1:0]         bits;
   rand bit [RSVD_WIDTH-1:0]   rsvd;
+  rand pte_pbmt_t              pbmt;
+  // Svpbmt is opt-in so existing target output remains unchanged.
+  bit                          enable_svpbmt = 1'b0;
   int                         child_table_id;
   bit      [XLEN-1:0]         starting_pa; // Starting physical address
   bit      [XLEN-1:0]         starting_va; // Starting virtual address offset
@@ -61,6 +72,15 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
   constraint reserved_bits_c {
     soft rsw  == '0;
     soft rsvd == '0;
+  }
+
+  constraint pbmt_c {
+    if (!enable_svpbmt || !((MODE == SV39) || (MODE == SV48)) ||
+        !v || (xwr == NEXT_LEVEL_PAGE)) {
+      pbmt == PTE_PBMT_PMA;
+    } else {
+      pbmt inside {PTE_PBMT_PMA, PTE_PBMT_NC, PTE_PBMT_IO};
+    }
   }
 
   // PPN is assigned in the post-process
@@ -86,6 +106,7 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
   virtual function void turn_off_default_constraint();
     access_dirty_bit_c.constraint_mode(0);
     reserved_bits_c.constraint_mode(0);
+    pbmt_c.constraint_mode(0);
     ppn_zero_c.constraint_mode(0);
     sw_legal_c.constraint_mode(0);
   endfunction
@@ -111,6 +132,8 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
     this.ppn3 = rhs_.ppn3;
     this.bits = rhs_.bits;
     this.rsvd = rhs_.rsvd;
+    this.pbmt = rhs_.pbmt;
+    this.enable_svpbmt = rhs_.enable_svpbmt;
     this.starting_pa = rhs_.starting_pa;
     this.starting_va = rhs_.starting_va;
     this.child_table_id = rhs_.child_table_id;
@@ -126,15 +149,24 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
       SV48: str = {str, $sformatf(", ppn[3:0] = %0d/%0d/%0d/%0d", ppn3, ppn2, ppn1, ppn0)};
       default: `uvm_fatal(get_full_name(), $sformatf("Unsupported mode %0x", MODE))
     endcase
+    if (enable_svpbmt) begin
+      str = {str, $sformatf(", pbmt: %0s", pbmt.name())};
+    end
     return str;
   endfunction
 
   // Pack the PTE to bit stream
   virtual function void pack_entry();
+    bit [9:0] rv64_upper_bits;
+    rv64_upper_bits = rsvd;
+    if (enable_svpbmt && v && (xwr != NEXT_LEVEL_PAGE)) begin
+      // Svpbmt occupies PTE[62:61], formerly reserved bits rsvd[8:7].
+      rv64_upper_bits[8:7] = pbmt;
+    end
     case(MODE)
       SV32: bits = {ppn1,ppn0,rsw,d,a,g,u,xwr,v};
-      SV39: bits = {rsvd,ppn2,ppn1,ppn0,rsw,d,a,g,u,xwr,v};
-      SV48: bits = {rsvd,ppn3,ppn2,ppn1,ppn0,rsw,d,a,g,u,xwr,v};
+      SV39: bits = {rv64_upper_bits,ppn2,ppn1,ppn0,rsw,d,a,g,u,xwr,v};
+      SV48: bits = {rv64_upper_bits,ppn3,ppn2,ppn1,ppn0,rsw,d,a,g,u,xwr,v};
       default: `uvm_fatal(get_full_name(), $sformatf("Unsupported mode %0x", MODE))
     endcase
   endfunction

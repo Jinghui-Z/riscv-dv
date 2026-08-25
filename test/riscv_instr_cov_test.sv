@@ -133,9 +133,17 @@ class riscv_instr_cov_test extends uvm_test;
         instr = riscv_instr::get_instr(instr_name);
         if ((instr.group inside {RV32I, RV32M, RV32C, RV64I, RV64M, RV64C,
                                  RV32F, RV64F, RV32D, RV64D, RV32B, RV64B,
-                                 RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBS, RV32ZCB,
-                                 RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBS, RV64ZCB}) &&
-            (instr.group inside {supported_isa})) begin
+                                 RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBKC, RV32ZBS, RV32ZCB,
+                                 RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBKC, RV64ZBS, RV64ZCB,
+                                 RV32ZICOND, RV64ZICOND, RV32ZIMOP, RV64ZIMOP,
+                                 RV32ZCMOP, RV64ZCMOP,
+                                 RV32ZICBOM, RV64ZICBOM, RV32ZICBOP, RV64ZICBOP,
+                                 RV32ZICBOZ, RV64ZICBOZ,
+                                 RV32ZBKB, RV64ZBKB, RV32ZBKX, RV64ZBKX,
+                                 RV32ZKND, RV64ZKND, RV32ZKNE, RV64ZKNE,
+                                 RV32ZKNH, RV64ZKNH, RV32ZKSED, RV64ZKSED,
+                                 RV32ZKSH, RV64ZKSH, SVINVAL, ZVBB}) &&
+            instr.is_group_supported(cfg)) begin
           assign_trace_info_to_instr(instr);
           instr.pre_sample();
           instr_cg.sample(instr);
@@ -155,7 +163,13 @@ class riscv_instr_cov_test extends uvm_test;
     get_val(trace["pc"], instr.pc, .hex(1));
     get_val(trace["binary"], instr.binary, .hex(1));
     instr.trace = trace["instr_str"];
+    // Zvbb coverage is encoding-based.  The base trace parser only understands
+    // scalar operands, so leave vector register and mask decoding to zvbb_cg.
+    if (instr.group == ZVBB) begin
+      return;
+    end
     if (instr.instr_name inside {NOP, WFI, FENCE, FENCE_I, EBREAK, C_EBREAK, SFENCE_VMA,
+                                 SFENCE_W_INVAL, SFENCE_INVAL_IR,
                                  ECALL, C_NOP, MRET, SRET, URET}) begin
       return;
     end
@@ -174,10 +188,43 @@ class riscv_instr_cov_test extends uvm_test;
   endfunction : assign_trace_info_to_instr
 
   function string process_instr_name(string instr_name);
+    string operands[$];
     instr_name = instr_name.toupper();
     foreach (instr_name[i]) begin
       if (instr_name[i] == ".") begin
         instr_name[i] = "_";
+      end
+    end
+
+    // Zimop/Zcmop encode the code point in the mnemonic.  The generator uses
+    // one enum per operand shape and reconstructs the code point from binary.
+    if ((instr_name.len() >= 8) && (instr_name.substr(0, 6) == "MOP_RR_")) begin
+      return "MOP_RR";
+    end
+    if ((instr_name.len() >= 7) && (instr_name.substr(0, 5) == "MOP_R_")) begin
+      return "MOP_R";
+    end
+    if ((instr_name.len() >= 7) && (instr_name.substr(0, 5) == "C_MOP_")) begin
+      return "C_MOP";
+    end
+
+    // Zvbb arithmetic instructions append their operand form to the mnemonic,
+    // while the generator uses one enum for all legal .vv/.vx/.vi forms.
+    case (instr_name)
+      "VANDN_VV", "VANDN_VX":               return "VANDN";
+      "VROL_VV",  "VROL_VX":                return "VROL";
+      "VROR_VV",  "VROR_VX",  "VROR_VI":   return "VROR";
+      "VWSLL_VV", "VWSLL_VX", "VWSLL_VI":  return "VWSLL";
+      default: ;
+    endcase
+
+    // The trace converters retain the legacy RV32B aliases for these two
+    // encodings.  Under Zbkb they are architectural ZIP/UNZIP instructions.
+    if (cfg.enable_zbkb_extension || cfg.enable_zkn_extension || cfg.enable_zks_extension) begin
+      split_string(trace["operand"], ",", operands);
+      if ((operands.size() == 3) && (operands[2] == "15")) begin
+        if (instr_name == "SHFLI") return "ZIP";
+        if (instr_name == "UNSHFLI") return "UNZIP";
       end
     end
 

@@ -118,6 +118,7 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
   virtual function void randomize_page_table();
     int pte_index;
     exception_cfg.enable_exception = enable_exception;
+    exception_cfg.svade_fault_mode = cfg.svade_fault_mode;
     create_valid_pte();
     foreach(page_table[i]) begin
       `uvm_info(`gfn, $sformatf("Randomizing page table %0d, num of PTE: %0d",
@@ -140,6 +141,7 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
             // Invalid unused PTEs
             page_table[i].pte[j] = riscv_page_table_entry#(MODE)::type_id::
                                    create($sformatf("pte_%0d_%0d",i, j));
+            page_table[i].pte[j].enable_svpbmt = cfg.enable_svpbmt;
             page_table[i].pte[j].v = 1'b0;
           end
         end else begin
@@ -153,6 +155,7 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
         if(enable_exception) begin
           inject_page_table_exception(page_table[i].pte[j], page_table[i].level);
         end
+        randomize_leaf_pbmt(page_table[i].pte[j]);
         page_table[i].pte[j].pack_entry();
         `uvm_info(`gfn, $sformatf("%0s PT_%0d_%0d: %0s", privileged_mode.name(),
                         i, j, page_table[i].pte[j].convert2string()), UVM_HIGH)
@@ -160,8 +163,24 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
     end
   endfunction
 
+  // PBMT is a property of each leaf mapping, not of a page-table template.
+  // Randomize it after cloning so a single test covers PMA, NC and IO entries.
+  virtual function void randomize_leaf_pbmt(riscv_page_table_entry#(MODE) pte);
+    if (!cfg.enable_svpbmt || !((MODE == SV39) || (MODE == SV48)) ||
+        !pte.v || (pte.xwr == NEXT_LEVEL_PAGE)) begin
+      pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_PMA;
+      return;
+    end
+    case ($urandom_range(2, 0))
+      0: pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_PMA;
+      1: pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_NC;
+      2: pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_IO;
+    endcase
+  endfunction : randomize_leaf_pbmt
+
   // Create the basic legal page table entries
   virtual function void create_valid_pte();
+    valid_leaf_pte.enable_svpbmt = cfg.enable_svpbmt;
     // Randomize a valid leaf PTE entry
     `DV_CHECK_RANDOMIZE_WITH_FATAL(valid_leaf_pte,
       // Set the correct privileged mode
@@ -182,10 +201,15 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
       // Page is valid
       v == 1'b1;
     )
+    // Fault recovery must restore an ordinary mapping. Individual generated
+    // leaves receive independent PBMT values in randomize_page_table().
+    valid_leaf_pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_PMA;
+    valid_leaf_pte.pack_entry();
     $cast(valid_link_pte, valid_leaf_pte.clone());
     $cast(valid_data_leaf_pte, valid_leaf_pte.clone());
     illegal_pte.turn_off_default_constraint();
     valid_link_pte.xwr = NEXT_LEVEL_PAGE;
+    valid_link_pte.pbmt = riscv_page_table_entry#(MODE)::PTE_PBMT_PMA;
     valid_link_pte.a = 1'b0;
     valid_link_pte.d = 1'b0;
     valid_link_pte.u = 1'b0;

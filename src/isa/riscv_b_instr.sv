@@ -296,6 +296,10 @@ class riscv_b_instr extends riscv_instr;
                 $sformatf("%8h", {get_func7(), get_func5(), rs1, get_func3(), rd, get_opcode()});
           end
         end
+
+        if (instr_name inside {PACK, PACKH, PACKW}) begin
+          binary = $sformatf("%8h", {get_func7(), rs2, rs1, get_func3(), rd, get_opcode()});
+        end
       end
 
       I_FORMAT: begin
@@ -322,9 +326,10 @@ class riscv_b_instr extends riscv_instr;
         binary = $sformatf("%8h", {rs3, get_func2(), rs2, rs1, get_func3(), rd, get_opcode()});
       end
       default: begin
-        if (binary == "") binary = super.convert2bin(prefix);
+        ;
       end
     endcase
+    if (binary == "") binary = super.convert2bin();
     return {prefix, binary};
   endfunction
 
@@ -337,6 +342,11 @@ class riscv_b_instr extends riscv_instr;
   endfunction : do_copy
 
   virtual function bit is_supported(riscv_instr_gen_config cfg);
+    if (instr_name inside {PACK, PACKH, PACKW}) begin
+      if ((XLEN == 32) && (instr_name == PACKW)) return 1'b0;
+      return cfg.enable_zbkb_extension || cfg.enable_zkn_extension || cfg.enable_zks_extension ||
+             (cfg.enable_b_extension && (ZBP inside {cfg.enable_bitmanip_groups}));
+    end
     return cfg.enable_b_extension && (
            (ZBP inside {cfg.enable_bitmanip_groups} && instr_name inside {
                GREV, GREVW, GREVI, GREVIW,
@@ -362,6 +372,19 @@ class riscv_b_instr extends riscv_instr;
                CMOV, CMIX,
                FSL, FSLW, FSR, FSRW, FSRI, FSRIW})
            );
+  endfunction
+
+  virtual function bit is_group_member(riscv_instr_group_t query_group);
+    if (instr_name inside {PACK, PACKH, PACKW}) begin
+      if ((XLEN == 32) && (instr_name == PACKW)) return 1'b0;
+      if (super.is_group_member(query_group)) return 1'b1;
+      if (XLEN == 32) begin
+        return query_group inside {RV32ZBKB, RV32ZKN, RV32ZKS};
+      end else begin
+        return query_group inside {RV64ZBKB, RV64ZKN, RV64ZKS};
+      end
+    end
+    return super.is_group_member(query_group);
   endfunction
 
   // coverage related functons
@@ -397,6 +420,3 @@ class riscv_b_instr extends riscv_instr;
   endfunction : update_src_regs
 
 endclass
-
-
-

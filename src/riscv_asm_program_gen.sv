@@ -72,6 +72,10 @@ class riscv_asm_program_gen extends uvm_object;
     gen_program_header();
     for (int hart = 0; hart < cfg.num_of_harts; hart++) begin
       string sub_program_name[$];
+      // Platform hooks use the class hart field while generating inline
+      // initialization/interrupt sections.  Keep it synchronized with the
+      // loop index for multi-hart targets.
+      this.hart = hart;
       instr_stream.push_back($sformatf("h%0d_start:", hart));
       if (!cfg.bare_program_mode) begin
         setup_misa();
@@ -457,9 +461,18 @@ class riscv_asm_program_gen extends uvm_object;
         RV32D, RV64D, RV32DC : misa[MISA_EXT_D] = 1'b1;
         RVV                  : misa[MISA_EXT_V] = 1'b1;
         RV32X, RV64X         : misa[MISA_EXT_X] = 1'b1;
-        RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBS,
-        RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBS : ; // No Misa bit for Zb* extensions
+        RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBKC, RV32ZBS,
+        RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBKC, RV64ZBS : ; // No Misa bit for Zb* extensions
         RV32ZCB, RV64ZCB : ; // No Misa bit for Zc* extensions
+        RV32ZICOND, RV64ZICOND, RV32ZIMOP, RV64ZIMOP,
+        RV32ZCMOP, RV64ZCMOP,
+        RV32ZICBOM, RV64ZICBOM, RV32ZICBOP, RV64ZICBOP,
+        RV32ZICBOZ, RV64ZICBOZ,
+        RV32ZBKB, RV64ZBKB, RV32ZBKX, RV64ZBKX,
+        RV32ZKND, RV64ZKND, RV32ZKNE, RV64ZKNE,
+        RV32ZKNH, RV64ZKNH, RV32ZKSED, RV64ZKSED,
+        RV32ZKSH, RV64ZKSH, RV32ZKN, RV64ZKN,
+        RV32ZKS, RV64ZKS, SVINVAL, ZVBB : ; // Multi-letter extensions have no MISA bit
         default : `uvm_fatal(`gfn, $sformatf("%0s is not yet supported",
                                    supported_isa[i].name()))
       endcase
@@ -553,8 +566,15 @@ class riscv_asm_program_gen extends uvm_object;
     LMUL = 1;
     SEW = (ELEN <= XLEN) ? ELEN : XLEN;
     instr_stream.push_back($sformatf("li x%0d, %0d", cfg.gpr[1], cfg.vector_cfg.vl));
-    instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, m%0d, d%0d",
-                                     indent, cfg.gpr[0], cfg.gpr[1], SEW, LMUL, EDIV));
+    if (cfg.use_vector_1_0) begin
+      instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, m%0d, %0s, %0s",
+                                       indent, cfg.gpr[0], cfg.gpr[1], SEW, LMUL,
+                                       cfg.vector_cfg.vtype.vta ? "ta" : "tu",
+                                       cfg.vector_cfg.vtype.vma ? "ma" : "mu"));
+    end else begin
+      instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, m%0d, d%0d",
+                                       indent, cfg.gpr[0], cfg.gpr[1], SEW, LMUL, EDIV));
+    end
     instr_stream.push_back("vec_reg_init:");
 
     // Vector registers will be initialized using one of the following three methods
@@ -592,7 +612,11 @@ class riscv_asm_program_gen extends uvm_object;
         for (int v = 0; v < NUM_VEC_GPR; v++) begin
           int region = $urandom_range(0, valid_mem_region.size()-1);
           instr_stream.push_back($sformatf("%0sla t0, %0s", indent, valid_mem_region[region].name));
-          instr_stream.push_back($sformatf("%0svle.v v%0d, (t0)", indent, v));
+          if (cfg.use_vector_1_0) begin
+            instr_stream.push_back($sformatf("%0svle%0d.v v%0d, (t0)", indent, SEW, v));
+          end else begin
+            instr_stream.push_back($sformatf("%0svle.v v%0d, (t0)", indent, v));
+          end
         end
       end
     endcase
@@ -705,6 +729,8 @@ class riscv_asm_program_gen extends uvm_object;
     string str = format_string("test_done:", LABEL_STR_LEN);
     instr_stream.push_back(str);
     instr_stream.push_back({indent, "li gp, 1"});
+    instr_stream.push_back({indent, "li a0, 0"});
+    instr_stream.push_back({indent, ".word 0x0005006b"});
     if (cfg.bare_program_mode) begin
       instr_stream.push_back({indent, "j write_tohost"});
     end else begin
@@ -757,6 +783,7 @@ class riscv_asm_program_gen extends uvm_object;
       page_table_list.process_page_table(instr);
       gen_section(get_label("process_pt", hart), instr);
     end
+    setup_platform_interrupts(hart);
     // Setup mepc register, jump to init entry
     setup_epc(hart);
     // Initialization of any implementation-specific custom CSRs
@@ -1057,6 +1084,9 @@ class riscv_asm_program_gen extends uvm_object;
       push_gpr_to_kernel_stack(status, scratch, cfg.mstatus_mprv, cfg.sp, cfg.tp, instr);
     end
     gen_signature_handshake(instr, CORE_STATUS, HANDLING_EXCEPTION);
+    if (cfg.enable_tval_check) begin
+      gen_signature_handshake(.instr(instr), .signature_type(WRITE_CSR), .csr(tval));
+    end
     instr = {instr,
              // The trap is caused by an exception, read back xCAUSE, xEPC to see if these
              // CSR values are set properly. The checking is done by comparing against the log
@@ -1309,18 +1339,94 @@ class riscv_asm_program_gen extends uvm_object;
   // Only extend this function if the core utilizes a PLIC for handling interrupts
   // In this case, the core will write to a specific location as the response to the interrupt, and
   // external PLIC unit can detect this response and process the interrupt clean up accordingly.
+  virtual function void gen_plic_claim_complete_section(
+      ref string interrupt_handler_instr[$],
+      int hart,
+      privileged_mode_t mode,
+      privileged_reg_t cause,
+      interrupt_cause_t external_cause);
+    if (cfg.enable_plic_claim_complete) begin
+      bit [XLEN-1:0] claim_complete_addr;
+      claim_complete_addr = cfg.plic_claim_complete_addr;
+      case (mode)
+        MACHINE_MODE: begin
+          if (cfg.plic_m_claim_complete_addr != '0) begin
+            claim_complete_addr = cfg.plic_m_claim_complete_addr;
+          end
+        end
+        SUPERVISOR_MODE: begin
+          if (cfg.plic_s_claim_complete_addr != '0) begin
+            claim_complete_addr = cfg.plic_s_claim_complete_addr;
+          end
+        end
+        default: ;
+      endcase
+      if (claim_complete_addr == '0) begin
+        `uvm_fatal(`gfn, $sformatf("No PLIC claim/complete context configured for %0s",
+                                  mode.name()))
+      end
+      // Only external interrupts are sourced by the PLIC. Strip the interrupt
+      // flag before comparing the architectural cause code so timer/software
+      // interrupts never access the claim/complete register.
+      interrupt_handler_instr.push_back(
+          $sformatf("csrr x%0d, 0x%0x # %0s", cfg.gpr[0], cause, cause.name()));
+      interrupt_handler_instr.push_back(
+          $sformatf("slli x%0d, x%0d, 1", cfg.gpr[0], cfg.gpr[0]));
+      interrupt_handler_instr.push_back(
+          $sformatf("srli x%0d, x%0d, 1", cfg.gpr[0], cfg.gpr[0]));
+      interrupt_handler_instr.push_back(
+          $sformatf("li x%0d, %0d", cfg.gpr[1], external_cause));
+      interrupt_handler_instr.push_back(
+          $sformatf("bne x%0d, x%0d, 1f", cfg.gpr[0], cfg.gpr[1]));
+      interrupt_handler_instr.push_back(
+          $sformatf("li x%0d, 0x%0x", cfg.gpr[1],
+                    claim_complete_addr + hart * cfg.plic_hart_stride));
+      interrupt_handler_instr.push_back(
+          $sformatf("lw x%0d, 0(x%0d)", cfg.gpr[0], cfg.gpr[1]));
+      interrupt_handler_instr.push_back(
+          $sformatf("sw x%0d, 0(x%0d)", cfg.gpr[0], cfg.gpr[1]));
+      interrupt_handler_instr.push_back("1: nop");
+    end
+  endfunction
+
+  // Preserve the original virtual hook for target-specific interrupt cleanup.
   virtual function void gen_plic_section(ref string interrupt_handler_instr[$]);
-    // Utilize the memory mapped handshake scheme to signal the testbench that the interrupt
-    // handling has been completed and we are about to xRET out of the handler
+    // Signal the testbench after the architectural completion handshake.
     gen_signature_handshake(.instr(interrupt_handler_instr), .signature_type(CORE_STATUS),
                             .core_status(FINISHED_IRQ));
   endfunction
+
+  // Program the ACLINT state before dropping privilege. Addresses are target
+  // integration properties and therefore supplied through generator options.
+  virtual function void setup_platform_interrupts(int hart);
+    string instr[$];
+    if (!cfg.enable_aclint_init) return;
+    if ((cfg.aclint_msip_addr == 0) || (cfg.aclint_mtimecmp_addr == 0)) begin
+      `uvm_fatal(`gfn, "ACLINT initialization requires non-zero MSIP and MTIMECMP addresses")
+    end
+    instr.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0],
+                              cfg.aclint_msip_addr + hart * cfg.aclint_msip_stride));
+    instr.push_back($sformatf("sw x0, 0(x%0d)", cfg.gpr[0]));
+    instr.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0],
+                              cfg.aclint_mtimecmp_addr + hart * cfg.aclint_mtimecmp_stride));
+    instr.push_back($sformatf("li x%0d, -1", cfg.gpr[1]));
+    if (XLEN == 64) begin
+      instr.push_back($sformatf("sd x%0d, 0(x%0d)", cfg.gpr[1], cfg.gpr[0]));
+    end else begin
+      // Avoid a transient compare match while updating the split RV32
+      // register: make the high half maximal before writing the low half.
+      instr.push_back($sformatf("sw x%0d, 4(x%0d)", cfg.gpr[1], cfg.gpr[0]));
+      instr.push_back($sformatf("sw x%0d, 0(x%0d)", cfg.gpr[1], cfg.gpr[0]));
+    end
+    gen_section(get_label("aclint_init", hart), instr);
+  endfunction : setup_platform_interrupts
 
   // Interrupt handler routine
   virtual function void gen_interrupt_handler_section(privileged_mode_t mode, int hart);
     string mode_prefix;
     string ls_unit;
-    privileged_reg_t status, ip, ie, scratch;
+    privileged_reg_t status, ip, ie, scratch, cause;
+    interrupt_cause_t external_cause;
     string interrupt_handler_instr[$];
     ls_unit = (XLEN == 32) ? "w" : "d";
     if (mode < cfg.init_privileged_mode) return;
@@ -1332,6 +1438,8 @@ class riscv_asm_program_gen extends uvm_object;
         ip = MIP;
         ie = MIE;
         scratch = MSCRATCH;
+        cause = MCAUSE;
+        external_cause = M_EXTERNAL_INTR;
       end
       SUPERVISOR_MODE: begin
         mode_prefix = "s";
@@ -1339,6 +1447,8 @@ class riscv_asm_program_gen extends uvm_object;
         ip = SIP;
         ie = SIE;
         scratch = SSCRATCH;
+        cause = SCAUSE;
+        external_cause = S_EXTERNAL_INTR;
       end
       USER_MODE: begin
         mode_prefix = "u";
@@ -1346,6 +1456,8 @@ class riscv_asm_program_gen extends uvm_object;
         ip = UIP;
         ie = UIE;
         scratch = USCRATCH;
+        cause = UCAUSE;
+        external_cause = U_EXTERNAL_INTR;
       end
       default: `uvm_fatal(get_full_name(), $sformatf("Unsupported mode: %0s", mode.name()))
     endcase
@@ -1380,6 +1492,7 @@ class riscv_asm_program_gen extends uvm_object;
            $sformatf("csrrc x%0d, 0x%0x, x%0d # %0s;",
                      cfg.gpr[0], ip, cfg.gpr[0], ip.name())
     };
+    gen_plic_claim_complete_section(interrupt_handler_instr, hart, mode, cause, external_cause);
     gen_plic_section(interrupt_handler_instr);
     // Restore user mode GPR value from kernel stack before return
     pop_gpr_from_kernel_stack(status, scratch, cfg.mstatus_mprv,
@@ -1624,23 +1737,42 @@ class riscv_asm_program_gen extends uvm_object;
 
   virtual function void randomize_vec_gpr_and_csr();
     string lmul;
+    string tail_policy;
+    string mask_policy;
     if (!(RVV inside {supported_isa})) return;
     instr_stream.push_back({indent, $sformatf("csrwi vxsat, %0d", cfg.vector_cfg.vxsat)});
     instr_stream.push_back({indent, $sformatf("csrwi vxrm, %0d", cfg.vector_cfg.vxrm)});
     init_vec_gpr(); // GPR init uses a temporary SEW/LMUL setting before the final value set below.
+    tail_policy = cfg.vector_cfg.vtype.vta ? "ta" : "tu";
+    mask_policy = cfg.vector_cfg.vtype.vma ? "ma" : "mu";
     instr_stream.push_back($sformatf("li x%0d, %0d", cfg.gpr[1], cfg.vector_cfg.vl));
     if ((cfg.vector_cfg.vtype.vlmul > 1) && (cfg.vector_cfg.vtype.fractional_lmul)) begin
       lmul = $sformatf("mf%0d", cfg.vector_cfg.vtype.vlmul);
     end else begin
       lmul = $sformatf("m%0d", cfg.vector_cfg.vtype.vlmul);
     end
-    instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, %0s, d%0d",
-                                     indent,
-                                     cfg.gpr[0],
-                                     cfg.gpr[1],
-                                     cfg.vector_cfg.vtype.vsew,
-                                     lmul,
-                                     cfg.vector_cfg.vtype.vediv));
+    if (cfg.use_vector_1_0) begin
+      // Establish the state with the register-AVL form first. The immediate
+      // and register-vtype forms below repeat the same state, exercising all
+      // VSET encodings without invalidating vector_cfg's assumptions.
+      instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, %0s, %0s, %0s",
+                                       indent, cfg.gpr[0], cfg.gpr[1],
+                                       cfg.vector_cfg.vtype.vsew, lmul,
+                                       tail_policy, mask_policy));
+      if (cfg.use_vsetivli && (cfg.vector_cfg.vl <= 31)) begin
+        instr_stream.push_back($sformatf("%svsetivli x%0d, %0d, e%0d, %0s, %0s, %0s",
+                                         indent, cfg.gpr[0], cfg.vector_cfg.vl,
+                                         cfg.vector_cfg.vtype.vsew, lmul,
+                                         tail_policy, mask_policy));
+      end
+      instr_stream.push_back($sformatf("%scsrr x%0d, vtype", indent, cfg.gpr[1]));
+      instr_stream.push_back($sformatf("%svsetvl x0, x0, x%0d", indent, cfg.gpr[1]));
+    end else begin
+      instr_stream.push_back($sformatf("%svsetvli x%0d, x%0d, e%0d, %0s, d%0d",
+                                       indent, cfg.gpr[0], cfg.gpr[1],
+                                       cfg.vector_cfg.vtype.vsew, lmul,
+                                       cfg.vector_cfg.vtype.vediv));
+    end
   endfunction
 
 endclass

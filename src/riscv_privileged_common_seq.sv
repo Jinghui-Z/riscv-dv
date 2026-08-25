@@ -47,7 +47,11 @@ class riscv_privileged_common_seq extends uvm_sequence;
     if(mode == USER_MODE) begin
       setup_umode_reg(mode, regs);
     end
+    setup_stateen(mode, instrs);
+    setup_sstc(mode, instrs);
+    setup_cbo(mode, instrs);
     if(cfg.virtual_addr_translation_on) begin
+      setup_svpbmt(instrs);
       setup_satp(instrs);
     end
     gen_csr_instr(regs, instrs);
@@ -59,7 +63,144 @@ class riscv_privileged_common_seq extends uvm_sequence;
     instrs.push_front(label);
   endfunction
 
+  // When M-mode is implemented, Svpbmt PTE encodings are enabled through
+  // menvcfg.PBMTE.  Set it before installing SATP so generated PBMT leaf PTEs
+  // are architecturally active as soon as translation starts.
+  virtual function void setup_svpbmt(ref string instrs[$]);
+    riscv_privil_reg menvcfg;
+    privileged_reg_t menvcfg_csr;
+    if (!cfg.enable_svpbmt) return;
+    // Without M-mode there is no menvcfg gate; PBMT interpretation is enabled
+    // directly by the supervisor implementation.
+    if (!(MACHINE_MODE inside {supported_privileged_mode})) return;
+    menvcfg_csr = (XLEN == 32) ? MENVCFGH : MENVCFG;
+    if (!(menvcfg_csr inside {implemented_csr})) begin
+      `uvm_fatal(`gfn, $sformatf(
+          "Svpbmt requires %0s.PBMTE when M-mode is implemented", menvcfg_csr.name()))
+    end
+    menvcfg = riscv_privil_reg::type_id::create("menvcfg_svpbmt");
+    menvcfg.init_reg(menvcfg_csr);
+    menvcfg.set_field("PBMTE", 1'b1);
+    instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], menvcfg.get_val()));
+    instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable Svpbmt",
+                              menvcfg_csr, cfg.gpr[0]));
+  endfunction : setup_svpbmt
+
+  // Open the state-enable hierarchy needed by the selected lower privilege.
+  // The NanHu profile implements C/ENVCFG/SE0 in mstateen0 and the SE bits in
+  // mstateen1-3. RV32 places the upper controls in the corresponding *H CSR.
+  virtual function void setup_stateen(privileged_mode_t mode, ref string instrs[$]);
+    riscv_privil_reg stateen;
+    privileged_reg_t mstateen_low[4] = '{MSTATEEN0, MSTATEEN1, MSTATEEN2, MSTATEEN3};
+    privileged_reg_t mstateen_high[4] =
+        '{MSTATEEN0H, MSTATEEN1H, MSTATEEN2H, MSTATEEN3H};
+    if ((mode == MACHINE_MODE) || !(MACHINE_MODE inside {supported_privileged_mode})) return;
+
+    if (MSTATEEN0 inside {implemented_csr}) begin
+      stateen = riscv_privil_reg::type_id::create("mstateen0_setup");
+      stateen.init_reg(MSTATEEN0);
+      stateen.set_field("C", 1'b1);
+      stateen.set_field("FCSR", cfg.enable_floating_point);
+      if (XLEN == 64) begin
+        stateen.set_field("ENVCFG", 1'b1);
+        stateen.set_field("SE0", 1'b1);
+      end
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], stateen.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable mstateen0",
+                                MSTATEEN0, cfg.gpr[0]));
+    end
+    if ((XLEN == 32) && (MSTATEEN0H inside {implemented_csr})) begin
+      stateen = riscv_privil_reg::type_id::create("mstateen0h_setup");
+      stateen.init_reg(MSTATEEN0H);
+      stateen.set_field("ENVCFG", 1'b1);
+      stateen.set_field("SE0", 1'b1);
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], stateen.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable mstateen0h",
+                                MSTATEEN0H, cfg.gpr[0]));
+    end
+    for (int i = 1; i < 4; i++) begin
+      privileged_reg_t csr = (XLEN == 32) ? mstateen_high[i] : mstateen_low[i];
+      if (!(csr inside {implemented_csr})) continue;
+      stateen = riscv_privil_reg::type_id::create($sformatf("mstateen%0d_setup", i));
+      stateen.init_reg(csr);
+      stateen.set_field("SE", 1'b1);
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], stateen.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable mstateen%0d",
+                                csr, cfg.gpr[0], i));
+    end
+    if ((mode == USER_MODE) && (SSTATEEN0 inside {implemented_csr})) begin
+      stateen = riscv_privil_reg::type_id::create("sstateen0_setup");
+      stateen.init_reg(SSTATEEN0);
+      stateen.set_field("C", 1'b1);
+      stateen.set_field("FCSR", cfg.enable_floating_point);
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], stateen.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable sstateen0",
+                                SSTATEEN0, cfg.gpr[0]));
+    end
+  endfunction : setup_stateen
+
+  // Enable direct S-mode access to stimecmp.  mcounteren.TM is initialized in
+  // setup_mmode_reg; menvcfg.STCE is in menvcfgh on RV32.
+  virtual function void setup_sstc(privileged_mode_t mode, ref string instrs[$]);
+    riscv_privil_reg menvcfg;
+    privileged_reg_t menvcfg_csr;
+    if ((mode == MACHINE_MODE) || !(STIMECMP inside {implemented_csr})) return;
+    if (!(MACHINE_MODE inside {supported_privileged_mode})) return;
+    menvcfg_csr = (XLEN == 32) ? MENVCFGH : MENVCFG;
+    if (!(menvcfg_csr inside {implemented_csr})) begin
+      `uvm_fatal(`gfn, $sformatf(
+          "Sstc requires %0s.STCE when M-mode is implemented", menvcfg_csr.name()))
+    end
+    menvcfg = riscv_privil_reg::type_id::create("menvcfg_sstc");
+    menvcfg.init_reg(menvcfg_csr);
+    menvcfg.set_field("STCE", 1'b1);
+    instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], menvcfg.get_val()));
+    instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable Sstc",
+                              menvcfg_csr, cfg.gpr[0]));
+  endfunction : setup_sstc
+
+  // Enable CBO instructions below M-mode.  CBIE=3 selects invalidate behavior;
+  // CBCFE enables clean/flush, and CBZE enables zero.  U-mode additionally
+  // requires the corresponding senvcfg bits.
+  virtual function void setup_cbo(privileged_mode_t mode, ref string instrs[$]);
+    riscv_privil_reg envcfg;
+    bit enable_zicbom = cfg.enable_zicbom_extension;
+    bit enable_zicboz = cfg.enable_zicboz_extension;
+    if ((mode == MACHINE_MODE) || !(enable_zicbom || enable_zicboz)) return;
+    if (MACHINE_MODE inside {supported_privileged_mode}) begin
+      if (!(MENVCFG inside {implemented_csr})) begin
+        `uvm_fatal(`gfn, "CBO instructions below M-mode require MENVCFG")
+      end
+      envcfg = riscv_privil_reg::type_id::create("menvcfg_cbo");
+      envcfg.init_reg(MENVCFG);
+      if (enable_zicbom) begin
+        envcfg.set_field("CBIE", 2'b11);
+        envcfg.set_field("CBCFE", 1'b1);
+      end
+      if (enable_zicboz) envcfg.set_field("CBZE", 1'b1);
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], envcfg.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable CBO in S-mode",
+                                MENVCFG, cfg.gpr[0]));
+    end
+    if (mode == USER_MODE) begin
+      if (!(SENVCFG inside {implemented_csr})) begin
+        `uvm_fatal(`gfn, "CBO instructions in U-mode require SENVCFG")
+      end
+      envcfg = riscv_privil_reg::type_id::create("senvcfg_cbo");
+      envcfg.init_reg(SENVCFG);
+      if (enable_zicbom) begin
+        envcfg.set_field("CBIE", 2'b11);
+        envcfg.set_field("CBCFE", 1'b1);
+      end
+      if (enable_zicboz) envcfg.set_field("CBZE", 1'b1);
+      instrs.push_back($sformatf("li x%0d, 0x%0x", cfg.gpr[0], envcfg.get_val()));
+      instrs.push_back($sformatf("csrs 0x%0x, x%0d # enable CBO in U-mode",
+                                SENVCFG, cfg.gpr[0]));
+    end
+  endfunction : setup_cbo
+
   virtual function void setup_mmode_reg(privileged_mode_t mode, ref riscv_privil_reg regs[$]);
+    riscv_privil_reg mcounteren;
     mstatus = riscv_privil_reg::type_id::create("mstatus");
     mstatus.init_reg(MSTATUS);
     if (cfg.randomize_csr) begin
@@ -119,7 +260,15 @@ class riscv_privileged_common_seq extends uvm_sequence;
       mie.set_field("MTIE", cfg.enable_interrupt & cfg.enable_timer_irq);
       mie.set_field("STIE", cfg.enable_interrupt & cfg.enable_timer_irq);
       mie.set_field("UTIE", cfg.enable_interrupt & cfg.enable_timer_irq);
+      mie.set_field("LCOFIE", cfg.enable_interrupt & cfg.enable_sscofpmf);
       regs.push_back(mie);
+    end
+    if ((mode != MACHINE_MODE) && (STIMECMP inside {implemented_csr}) &&
+        (MCOUNTEREN inside {implemented_csr})) begin
+      mcounteren = riscv_privil_reg::type_id::create("mcounteren_sstc");
+      mcounteren.init_reg(MCOUNTEREN);
+      mcounteren.set_field("TM", 1'b1);
+      regs.push_back(mcounteren);
     end
   endfunction
 
@@ -138,6 +287,7 @@ class riscv_privileged_common_seq extends uvm_sequence;
       sstatus.set_field("UXL", 2'b10);
     end
     sstatus.set_field("FS", cfg.mstatus_fs);
+    sstatus.set_field("VS", cfg.mstatus_vs);
     sstatus.set_field("XS", 0);
     sstatus.set_field("SD", 0);
     sstatus.set_field("UIE", 0);
@@ -156,6 +306,7 @@ class riscv_privileged_common_seq extends uvm_sequence;
       sie.set_field("SSIE", cfg.enable_interrupt);
       sie.set_field("STIE", cfg.enable_interrupt & cfg.enable_timer_irq);
       sie.set_field("UTIE", cfg.enable_interrupt & cfg.enable_timer_irq);
+      sie.set_field("LCOFIE", cfg.enable_interrupt & cfg.enable_sscofpmf);
       regs.push_back(sie);
     end
   endfunction

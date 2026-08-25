@@ -45,7 +45,10 @@ class riscv_zbb_instr extends riscv_instr;
   endfunction
 
   function bit is_rv64();
-    is_rv64 = (group == RV64B);
+    // Common Zbb/Zbkb instructions are declared in the RV32 group so the
+    // same class can be selected for both XLENs.  The group therefore cannot
+    // be used to select the RV64 encoding (for example REV8 and ZEXT.H).
+    is_rv64 = (XLEN == 64);
   endfunction : is_rv64
 
   virtual function void set_imm_len();
@@ -188,6 +191,8 @@ class riscv_zbb_instr extends riscv_instr;
       R_FORMAT: begin
         if (instr_name inside { ZEXT_H }) begin
           binary = $sformatf("%8h", {get_func7(), get_func5(), rs1, get_func3(), rd, get_opcode()});
+        end else begin
+          binary = $sformatf("%8h", {get_func7(), rs2, rs1, get_func3(), rd, get_opcode()});
         end
       end
 
@@ -198,7 +203,7 @@ class riscv_zbb_instr extends riscv_instr;
                                        get_opcode()});
           end
           RORIW: begin
-            binary = $sformatf("%8h", {get_func7(), imm[5:0], rs1, get_func3(), rd, get_opcode()});
+            binary = $sformatf("%8h", {get_func7(), imm[4:0], rs1, get_func3(), rd, get_opcode()});
           end
           RORI: begin
             // set bit 0 of funct7 only if rv64 and shamt[MSB] is set
@@ -208,18 +213,24 @@ class riscv_zbb_instr extends riscv_instr;
         endcase
       end
 
-      default: begin
-        if (binary == "") begin
-          binary = super.convert2bin(prefix);
-        end
-      end
+      default: ;
 
     endcase // case (format)
+    if (binary == "") binary = super.convert2bin();
+    return {prefix, binary};
   endfunction : convert2bin
 
   virtual function bit is_supported(riscv_instr_gen_config cfg);
-    return (cfg.enable_zbb_extension &&
-           (RV32ZBB inside { supported_isa } || RV64ZBB inside { supported_isa }) &&
+    // The *W rotate forms are RV64-only.  They share encodings with Zbkb on
+    // RV64, but must not become visible in an RV32 aggregate Zkn/Zks profile.
+    if ((XLEN == 32) && instr_name inside {CLZW, CPOPW, CTZW, ROLW, RORW, RORIW}) begin
+      return 1'b0;
+    end
+    return ((cfg.enable_zbb_extension ||
+             ((cfg.enable_zbkb_extension || cfg.enable_zkn_extension || cfg.enable_zks_extension) &&
+              instr_name inside {ANDN, ORN, XNOR, ROL, ROR, RORI,
+                                 ROLW, RORW, RORIW, REV8,
+                                 ZEXT_H})) &&
            instr_name inside {
              ANDN,
              CLZ, CLZW,
@@ -237,6 +248,22 @@ class riscv_zbb_instr extends riscv_instr;
              ZEXT_H
            });
   endfunction : is_supported
+
+  virtual function bit is_group_member(riscv_instr_group_t query_group);
+    if ((XLEN == 32) && instr_name inside {CLZW, CPOPW, CTZW, ROLW, RORW, RORIW}) begin
+      return 1'b0;
+    end
+    if (super.is_group_member(query_group)) return 1'b1;
+    if (instr_name inside {ANDN, ORN, XNOR, ROL, ROR, RORI, ROLW, RORW, RORIW,
+                           REV8, ZEXT_H}) begin
+      if (XLEN == 32) begin
+        return query_group inside {RV32ZBKB, RV32ZKN, RV32ZKS};
+      end else begin
+        return query_group inside {RV64ZBKB, RV64ZKN, RV64ZKS};
+      end
+    end
+    return 1'b0;
+  endfunction
 
   virtual function void update_src_regs(string operands[$]);
     // All ZBB I_FORMAT instructions other than RORI use the immediate to specify the operation,

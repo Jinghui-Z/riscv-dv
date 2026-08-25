@@ -58,16 +58,35 @@ class riscv_zbc_instr extends riscv_instr;
       binary = $sformatf("%8h", {get_func7(), rs2, rs1, get_func3(), rd, get_opcode()});
     end
     else begin
-      binary = super.convert2bin(prefix);
+      binary = super.convert2bin();
     end
+    return {prefix, binary};
   endfunction : convert2bin
 
   virtual function bit is_supported(riscv_instr_gen_config cfg);
-    return (cfg.enable_zbc_extension &&
-           (RV32ZBC inside { supported_isa } || RV64ZBC inside { supported_isa }) &&
-            instr_name inside {
-              CLMUL, CLMULH, CLMULR
-            });
+    bit has_zbc;
+    bit has_zbkc;
+    has_zbc = cfg.enable_zbc_extension &&
+              ((RV32ZBC inside {supported_isa}) || (RV64ZBC inside {supported_isa}));
+    has_zbkc = cfg.enable_zbkc_extension &&
+               ((RV32ZBKC inside {supported_isa}) || (RV64ZBKC inside {supported_isa}));
+    if (instr_name == CLMULR) return has_zbc;
+    return (instr_name inside {CLMUL, CLMULH}) && (has_zbc || has_zbkc);
   endfunction : is_supported
+
+  // CLMUL and CLMULH are shared by Zbc, Zbkc, Zkn and Zks. CLMULR remains
+  // exclusive to Zbc.
+  virtual function bit is_group_member(riscv_instr_group_t query_group);
+    if (super.is_group_member(query_group)) return 1'b1;
+    if ((XLEN == 64) && (query_group == RV64ZBC)) return 1'b1;
+    if (instr_name inside {CLMUL, CLMULH}) begin
+      if (XLEN == 32) begin
+        return query_group inside {RV32ZBKC, RV32ZKN, RV32ZKS};
+      end else begin
+        return query_group inside {RV64ZBKC, RV64ZKN, RV64ZKS};
+      end
+    end
+    return 1'b0;
+  endfunction
 
 endclass : riscv_zbc_instr

@@ -1316,6 +1316,104 @@ class riscv_instr_cover_group;
     `CP_VALUE_RANGE(num_shift, instr.imm, 0, XLEN/2-1)
   `CG_END
 
+  // Ratified scalar extensions used by the NanHu profile.  A single family
+  // covergroup keeps aggregate Zkn/Zks coverage aligned with their constituent
+  // extensions while still covering every architectural mnemonic separately.
+  covergroup scalar_ext_cg with function sample(riscv_instr instr);
+    cp_instr : coverpoint instr.instr_name {
+      bins zicond[] = {CZERO_EQZ, CZERO_NEZ};
+      bins zimop[]  = {MOP_R, MOP_RR};
+      bins zcmop[]  = {C_MOP};
+      bins zicbom[] = {CBO_CLEAN, CBO_FLUSH, CBO_INVAL};
+      bins zicbop[] = {PREFETCH_I, PREFETCH_R, PREFETCH_W};
+      bins zicboz[] = {CBO_ZERO};
+      bins zbkb[]   = {ANDN, ORN, XNOR, ROL, ROLW, ROR, RORW, RORI, RORIW,
+                       REV8, BREV8, ZIP, UNZIP, PACK, PACKH, PACKW, ZEXT_H};
+      bins zbkc[]   = {CLMUL, CLMULH};
+      bins zbkx[]   = {XPERM4, XPERM8};
+      bins zknd[]   = {AES32DSI, AES32DSMI, AES64DS, AES64DSM, AES64IM};
+      bins zkne[]   = {AES32ESI, AES32ESMI, AES64ES, AES64ESM};
+      bins aes_key_schedule[] = {AES64KS1I, AES64KS2};
+      bins zknh[]   = {SHA256SIG0, SHA256SIG1, SHA256SUM0, SHA256SUM1,
+                       SHA512SIG0, SHA512SIG1, SHA512SUM0, SHA512SUM1,
+                       SHA512SIG0H, SHA512SIG0L, SHA512SIG1H, SHA512SIG1L,
+                       SHA512SUM0R, SHA512SUM1R};
+      bins zksed[]  = {SM4ED, SM4KS};
+      bins zksh[]   = {SM3P0, SM3P1};
+    }
+    cp_rd  : coverpoint instr.rd  iff (instr.has_rd);
+    cp_rs1 : coverpoint instr.rs1 iff (instr.has_rs1);
+    cp_rs2 : coverpoint instr.rs2 iff (instr.has_rs2);
+    cp_mop_r_code : coverpoint instr.imm[4:0] iff (instr.instr_name == MOP_R);
+    cp_mop_rr_code : coverpoint instr.imm[2:0] iff (instr.instr_name == MOP_RR);
+    cp_c_mop_code : coverpoint instr.imm[3:0] iff (instr.instr_name == C_MOP) {
+      bins codepoint[] = {1, 3, 5, 7, 9, 11, 13, 15};
+    }
+    cp_prefetch_offset : coverpoint instr.imm[11:5]
+      iff (instr.instr_name inside {PREFETCH_I, PREFETCH_R, PREFETCH_W});
+    cp_crypto_byte_select : coverpoint instr.imm[1:0]
+      iff (instr.instr_name inside {AES32DSI, AES32DSMI, AES32ESI, AES32ESMI, SM4ED, SM4KS});
+    cp_aes_round_constant : coverpoint instr.imm[3:0] iff (instr.instr_name == AES64KS1I) {
+      bins valid[] = {[0:10]};
+    }
+  endgroup
+
+  covergroup svinval_cg with function sample(riscv_instr instr);
+    cp_instr : coverpoint instr.instr_name {
+      bins sinval_vma      = {SINVAL_VMA};
+      bins sfence_w_inval  = {SFENCE_W_INVAL};
+      bins sfence_inval_ir = {SFENCE_INVAL_IR};
+    }
+    cp_rs1 : coverpoint instr.rs1 iff (instr.instr_name == SINVAL_VMA);
+    cp_rs2 : coverpoint instr.rs2 iff (instr.instr_name == SINVAL_VMA);
+  endgroup
+
+  // Zvbb coverage is decoded directly from the architectural encoding.  This
+  // keeps trace coverage usable even when the optional generic vector coverage
+  // package is not compiled into riscv-dv.
+  covergroup zvbb_cg with function sample(riscv_instr instr);
+    cp_instr : coverpoint instr.instr_name {
+      bins logical[] = {VANDN};
+      bins unary[]   = {VBREV_V, VBREV8_V, VREV8_V, VCLZ_V, VCTZ_V, VCPOP_V};
+      bins rotate[]  = {VROL, VROR};
+      bins widen[]   = {VWSLL};
+    }
+    cp_vandn_form : coverpoint instr.binary[14:12] iff (instr.instr_name == VANDN) {
+      bins vv = {3'b000};
+      bins vx = {3'b100};
+    }
+    cp_vrol_form : coverpoint instr.binary[14:12] iff (instr.instr_name == VROL) {
+      bins vv = {3'b000};
+      bins vx = {3'b100};
+    }
+    cp_vror_form : coverpoint instr.binary[14:12] iff (instr.instr_name == VROR) {
+      bins vv = {3'b000};
+      bins vx = {3'b100};
+      bins vi = {3'b011};
+    }
+    cp_vwsll_form : coverpoint instr.binary[14:12] iff (instr.instr_name == VWSLL) {
+      bins vv = {3'b000};
+      bins vx = {3'b100};
+      bins vi = {3'b011};
+    }
+    cp_vm  : coverpoint instr.binary[25];
+    cp_vd  : coverpoint instr.binary[11:7];
+    cp_vs2 : coverpoint instr.binary[24:20];
+    cp_vror_uimm : coverpoint {instr.binary[26], instr.binary[19:15]}
+      iff ((instr.instr_name == VROR) && (instr.binary[14:12] == 3'b011)) {
+      bins zero = {0};
+      bins middle[] = {[1:62]};
+      bins max = {63};
+    }
+    cp_vwsll_uimm : coverpoint instr.binary[19:15]
+      iff ((instr.instr_name == VWSLL) && (instr.binary[14:12] == 3'b011)) {
+      bins zero = {0};
+      bins middle[] = {[1:30]};
+      bins max = {31};
+    }
+    instr_mask_cross : cross cp_instr, cp_vm;
+  endgroup
+
   // CSR instructions
   `CSR_INSTR_CG_BEGIN(csrrw)
     cp_rs1 : coverpoint instr.rs1;
@@ -1850,6 +1948,42 @@ class riscv_instr_cover_group;
 
    `VECTOR_INCLUDE("riscv_instr_cover_group_inc_cg_instantiation.sv")
 
+    if ((!select_isa || (cov_isa inside {
+          RV32ZICOND, RV64ZICOND, RV32ZIMOP, RV64ZIMOP, RV32ZCMOP, RV64ZCMOP,
+          RV32ZICBOM, RV64ZICBOM, RV32ZICBOP, RV64ZICBOP, RV32ZICBOZ, RV64ZICBOZ,
+          RV32ZBKC, RV64ZBKC,
+          RV32ZBKB, RV64ZBKB, RV32ZBKX, RV64ZBKX,
+          RV32ZKND, RV64ZKND, RV32ZKNE, RV64ZKNE, RV32ZKNH, RV64ZKNH,
+          RV32ZKSED, RV64ZKSED, RV32ZKSH, RV64ZKSH,
+          RV32ZKN, RV64ZKN, RV32ZKS, RV64ZKS})) &&
+        ((RV32ZICOND inside {supported_isa}) || (RV64ZICOND inside {supported_isa}) ||
+         (RV32ZIMOP inside {supported_isa})  || (RV64ZIMOP inside {supported_isa})  ||
+         (RV32ZCMOP inside {supported_isa})  || (RV64ZCMOP inside {supported_isa})  ||
+         (RV32ZICBOM inside {supported_isa}) || (RV64ZICBOM inside {supported_isa}) ||
+         (RV32ZICBOP inside {supported_isa}) || (RV64ZICBOP inside {supported_isa}) ||
+         (RV32ZICBOZ inside {supported_isa}) || (RV64ZICBOZ inside {supported_isa}) ||
+         (RV32ZBKC inside {supported_isa})   || (RV64ZBKC inside {supported_isa})   ||
+         (RV32ZBKB inside {supported_isa})   || (RV64ZBKB inside {supported_isa})   ||
+         (RV32ZBKX inside {supported_isa})   || (RV64ZBKX inside {supported_isa})   ||
+         (RV32ZKND inside {supported_isa})   || (RV64ZKND inside {supported_isa})   ||
+         (RV32ZKNE inside {supported_isa})   || (RV64ZKNE inside {supported_isa})   ||
+         (RV32ZKNH inside {supported_isa})   || (RV64ZKNH inside {supported_isa})   ||
+         (RV32ZKSED inside {supported_isa})  || (RV64ZKSED inside {supported_isa})  ||
+         (RV32ZKSH inside {supported_isa})   || (RV64ZKSH inside {supported_isa})   ||
+         (RV32ZKN inside {supported_isa})    || (RV64ZKN inside {supported_isa})    ||
+         (RV32ZKS inside {supported_isa})    || (RV64ZKS inside {supported_isa}))) begin
+      scalar_ext_cg = new();
+    end
+
+    if ((!select_isa || (cov_isa == SVINVAL)) && (SVINVAL inside {supported_isa})) begin
+      svinval_cg = new();
+    end
+
+    if ((!select_isa || (cov_isa == ZVBB)) &&
+        (RVV inside {supported_isa}) && (ZVBB inside {supported_isa})) begin
+      zvbb_cg = new();
+    end
+
     // RV32I instruction functional coverage instantiation
     `CG_SELECTOR_BEGIN(RV32I)
         add_cg = new();
@@ -2251,6 +2385,27 @@ class riscv_instr_cover_group;
     if (instr.binary[1:0] == 2'b11) begin
       `SAMPLE(opcode_cg, instr.binary[6:2]);
     end
+    if (instr.instr_name inside {
+          CZERO_EQZ, CZERO_NEZ, MOP_R, MOP_RR, C_MOP,
+          CBO_CLEAN, CBO_FLUSH, CBO_INVAL, CBO_ZERO,
+          PREFETCH_I, PREFETCH_R, PREFETCH_W,
+          ANDN, ORN, XNOR, ROL, ROLW, ROR, RORW, RORI, RORIW,
+          REV8, BREV8, ZIP, UNZIP, PACK, PACKH, PACKW, ZEXT_H,
+          CLMUL, CLMULH, XPERM4, XPERM8,
+          AES32DSI, AES32DSMI, AES32ESI, AES32ESMI,
+          AES64DS, AES64DSM, AES64ES, AES64ESM, AES64IM, AES64KS1I, AES64KS2,
+          SHA256SIG0, SHA256SIG1, SHA256SUM0, SHA256SUM1,
+          SHA512SIG0, SHA512SIG1, SHA512SUM0, SHA512SUM1,
+          SHA512SIG0H, SHA512SIG0L, SHA512SIG1H, SHA512SIG1L,
+          SHA512SUM0R, SHA512SUM1R, SM4ED, SM4KS, SM3P0, SM3P1}) begin
+      `SAMPLE(scalar_ext_cg, instr)
+    end
+    if (instr.instr_name inside {SINVAL_VMA, SFENCE_W_INVAL, SFENCE_INVAL_IR}) begin
+      `SAMPLE(svinval_cg, instr)
+    end
+    if (instr.group == ZVBB) begin
+      `SAMPLE(zvbb_cg, instr)
+    end
     case (instr.instr_name)
       ADD        : `SAMPLE(add_cg, instr)
       SUB        : `SAMPLE(sub_cg, instr)
@@ -2556,7 +2711,7 @@ class riscv_instr_cover_group;
         end
       end
     end
-    if (instr.category == CSR) begin
+    if ((instr.category == CSR) && (instr.format != VSET_FORMAT)) begin
       `SAMPLE(privileged_csr_cg, instr.csr);
       case (instr.csr)
         MCAUSE: begin
@@ -2619,13 +2774,22 @@ class riscv_instr_cover_group;
       if (!(instr_name inside {unsupported_instr}) && (instr_name != INVALID_INSTR) &&
           riscv_instr::instr_registry.exists(instr_name)) begin
         instr = riscv_instr::create_instr(instr_name);
-        if ((instr.group inside {supported_isa}) &&
+        if (instr.is_group_supported(cfg) &&
             (instr.group inside {RV32I, RV32M, RV64M, RV64I, RV32C, RV64C,
                                  RVV, RV64B, RV32B,
-                                 RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBS, RV32ZCB,
-                                 RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBS, RV64ZCB})) begin
+                                 RV32ZBA, RV32ZBB, RV32ZBC, RV32ZBKC, RV32ZBS, RV32ZCB,
+                                 RV64ZBA, RV64ZBB, RV64ZBC, RV64ZBKC, RV64ZBS, RV64ZCB,
+                                 RV32ZICOND, RV64ZICOND, RV32ZIMOP, RV64ZIMOP,
+                                 RV32ZCMOP, RV64ZCMOP,
+                                 RV32ZICBOM, RV64ZICBOM, RV32ZICBOP, RV64ZICBOP,
+                                 RV32ZICBOZ, RV64ZICBOZ,
+                                 RV32ZBKB, RV64ZBKB, RV32ZBKX, RV64ZBKX,
+                                 RV32ZKND, RV64ZKND, RV32ZKNE, RV64ZKNE,
+                                 RV32ZKNH, RV64ZKNH, RV32ZKSED, RV64ZKSED,
+                                 RV32ZKSH, RV64ZKSH, SVINVAL, ZVBB})) begin
           if (((instr_name inside {URET}) && !support_umode_trap) ||
-              ((instr_name inside {SRET, SFENCE_VMA}) &&
+              ((instr_name inside {SRET, SFENCE_VMA, SINVAL_VMA,
+                                    SFENCE_W_INVAL, SFENCE_INVAL_IR}) &&
               !(SUPERVISOR_MODE inside {supported_privileged_mode})) ||
               ((instr_name inside {DRET}) && !support_debug_mode)) begin
             instr_name = instr_name.next;

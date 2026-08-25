@@ -80,7 +80,9 @@ package riscv_instr_pkg;
     MACHINE_MODE    = 2'b11
   } privileged_mode_t;
 
-  typedef enum bit [5:0] {
+  // Keep the group encoding wide enough for the ratified scalar extensions.
+  // The original enum only covered the base ISA and the first B/Zc groups.
+  typedef enum bit [7:0] {
     RV32I,
     RV64I,
     RV32M,
@@ -102,18 +104,53 @@ package riscv_instr_pkg;
     RV32ZBA,
     RV32ZBB,
     RV32ZBC,
+    RV32ZBKC,
     RV32ZBS,
     RV64B,
     RV64ZBA,
     RV64ZBB,
     RV64ZBC,
+    RV64ZBKC,
     RV64ZBS,
     RV32ZCB,
     RV64ZCB,
     RV32ZMMUL,
     RV64ZMMUL,
     RV32X,
-    RV64X
+    RV64X,
+    // Scalar architectural extensions used by NanHu V5.1.
+    RV32ZICOND,
+    RV64ZICOND,
+    RV32ZIMOP,
+    RV64ZIMOP,
+    RV32ZCMOP,
+    RV64ZCMOP,
+    RV32ZICBOM,
+    RV64ZICBOM,
+    RV32ZICBOP,
+    RV64ZICBOP,
+    RV32ZICBOZ,
+    RV64ZICBOZ,
+    RV32ZBKB,
+    RV64ZBKB,
+    RV32ZBKX,
+    RV64ZBKX,
+    RV32ZKND,
+    RV64ZKND,
+    RV32ZKNE,
+    RV64ZKNE,
+    RV32ZKNH,
+    RV64ZKNH,
+    RV32ZKSED,
+    RV64ZKSED,
+    RV32ZKSH,
+    RV64ZKSH,
+    RV32ZKN,
+    RV64ZKN,
+    RV32ZKS,
+    RV64ZKS,
+    SVINVAL,
+    ZVBB
   } riscv_instr_group_t;
 
   typedef enum {
@@ -275,6 +312,57 @@ package riscv_instr_pkg;
     PACKW,
     PACKUW,
     XPERM_W,
+    // Zicond
+    CZERO_EQZ,
+    CZERO_NEZ,
+    // Zimop and Zcmop
+    MOP_R,
+    MOP_RR,
+    C_MOP,
+    // Zicbom/Zicbop/Zicboz
+    CBO_CLEAN,
+    CBO_FLUSH,
+    CBO_INVAL,
+    CBO_ZERO,
+    PREFETCH_I,
+    PREFETCH_R,
+    PREFETCH_W,
+    // Zbkb/Zbkx
+    BREV8,
+    ZIP,
+    UNZIP,
+    XPERM4,
+    XPERM8,
+    // Scalar cryptography
+    AES32DSI,
+    AES32DSMI,
+    AES32ESI,
+    AES32ESMI,
+    AES64DS,
+    AES64DSM,
+    AES64ES,
+    AES64ESM,
+    AES64IM,
+    AES64KS1I,
+    AES64KS2,
+    SHA256SIG0,
+    SHA256SIG1,
+    SHA256SUM0,
+    SHA256SUM1,
+    SHA512SIG0,
+    SHA512SIG1,
+    SHA512SUM0,
+    SHA512SUM1,
+    SHA512SIG0H,
+    SHA512SIG0L,
+    SHA512SIG1H,
+    SHA512SIG1L,
+    SHA512SUM0R,
+    SHA512SUM1R,
+    SM4ED,
+    SM4KS,
+    SM3P0,
+    SM3P1,
     // RV32ZCB
     C_LBU,
     C_LHU,
@@ -464,6 +552,7 @@ package riscv_instr_pkg;
     // Vector instructions
     VSETVL,
     VSETVLI,
+    VSETIVLI,
     VADD,
     VSUB,
     VRSUB,
@@ -528,6 +617,7 @@ package riscv_instr_pkg;
     VAADD,
     VASUBU,
     VASUB,
+    VSMUL,
     VSSRL,
     VSSRA,
     VNCLIPU,
@@ -539,6 +629,8 @@ package riscv_instr_pkg;
     VFMUL,
     VFDIV,
     VFRDIV,
+    VFWADD,
+    VFWSUB,
     VFWMUL,
     VFMACC,
     VFNMACC,
@@ -553,6 +645,8 @@ package riscv_instr_pkg;
     VFWMSAC,
     VFWNMSAC,
     VFSQRT_V,
+    VFRSQRT7_V,
+    VFREC7_V,
     VFMIN,
     VFMAX,
     VFSGNJ,
@@ -569,15 +663,21 @@ package riscv_instr_pkg;
     VFMV,
     VFCVT_XU_F_V,
     VFCVT_X_F_V,
+    VFCVT_RTZ_XU_F_V,
+    VFCVT_RTZ_X_F_V,
     VFCVT_F_XU_V,
     VFCVT_F_X_V,
     VFWCVT_XU_F_V,
     VFWCVT_X_F_V,
+    VFWCVT_RTZ_XU_F_V,
+    VFWCVT_RTZ_X_F_V,
     VFWCVT_F_XU_V,
     VFWCVT_F_X_V,
     VFWCVT_F_F_V,
     VFNCVT_XU_F_W,
     VFNCVT_X_F_W,
+    VFNCVT_RTZ_XU_F_W,
+    VFNCVT_RTZ_X_F_W,
     VFNCVT_F_XU_W,
     VFNCVT_F_X_W,
     VFNCVT_F_F_W,
@@ -596,6 +696,7 @@ package riscv_instr_pkg;
     VFREDOSUM_VS,
     VFREDSUM_VS,
     VFREDMAX_VS,
+    VFREDMIN_VS,
     VFWREDOSUM_VS,
     VFWREDSUM_VS,
     // Vector mask instruction
@@ -608,6 +709,7 @@ package riscv_instr_pkg;
     VMORNOT_MM,
     VMXNOR_MM,
     VPOPC_M,
+    VCPOP_M,
     VFIRST_M,
     VMSBF_M,
     VMSIF_M,
@@ -623,7 +725,16 @@ package riscv_instr_pkg;
     VSLIDEDOWN,
     VSLIDE1UP,
     VSLIDE1DOWN,
+    VFSLIDE1UP,
+    VFSLIDE1DOWN,
     VRGATHER,
+    VRGATHEREI16,
+    VZEXT_VF2,
+    VZEXT_VF4,
+    VZEXT_VF8,
+    VSEXT_VF2,
+    VSEXT_VF4,
+    VSEXT_VF8,
     VCOMPRESS,
     VMV1R_V,
     VMV2R_V,
@@ -634,16 +745,42 @@ package riscv_instr_pkg;
     VSE_V,
     VLSE_V,
     VSSE_V,
+    // V 1.0 indexed loads split into ordered (vloxei) and unordered (vluxei).
+    VLUXEI_V,
     VLXEI_V,
     VSXEI_V,
     VSUXEI_V,
     VLEFF_V,
+    // V 1.0 mask and whole-register unit-stride memory instructions.
+    VLM_V,
+    VSM_V,
+    VL1RE8_V,
+    VL1RE16_V,
+    VL1RE32_V,
+    VL1RE64_V,
+    VL2RE8_V,
+    VL2RE16_V,
+    VL2RE32_V,
+    VL2RE64_V,
+    VL4RE8_V,
+    VL4RE16_V,
+    VL4RE32_V,
+    VL4RE64_V,
+    VL8RE8_V,
+    VL8RE16_V,
+    VL8RE32_V,
+    VL8RE64_V,
+    VS1R_V,
+    VS2R_V,
+    VS4R_V,
+    VS8R_V,
     // Segmented load/store instruction
     VLSEGE_V,
     VSSEGE_V,
     VLSEGEFF_V,
     VLSSEGE_V,
     VSSSEGE_V,
+    VLUXSEGEI_V,
     VLXSEGEI_V,
     VSXSEGEI_V,
     VSUXSEGEI_V,
@@ -658,6 +795,17 @@ package riscv_instr_pkg;
     VAMOMAXE_V,
     VAMOMINUE_V,
     VAMOMAXUE_V,
+    // Zvbb vector bit-manipulation instructions
+    VANDN,
+    VBREV_V,
+    VBREV8_V,
+    VREV8_V,
+    VCLZ_V,
+    VCTZ_V,
+    VCPOP_V,
+    VROL,
+    VROR,
+    VWSLL,
     // Supervisor instruction
     DRET,
     MRET,
@@ -665,6 +813,9 @@ package riscv_instr_pkg;
     SRET,
     WFI,
     SFENCE_VMA,
+    SINVAL_VMA,
+    SFENCE_W_INVAL,
+    SFENCE_INVAL_IR,
     // Custom instructions
     `include "isa/custom/riscv_custom_instr_enum.sv"
     // You can add other instructions here
@@ -738,6 +889,7 @@ package riscv_instr_pkg;
     VX,
     VF,
     WV,
+    WF,
     WI,
     WX,
     VVM,
@@ -859,14 +1011,22 @@ package riscv_instr_pkg;
     SCOUNTEREN      = 'h106,  // Supervisor counter enable
     // Supervisor Configuration
     SENVCFG         = 'h10A,  // Supervisor environment configuration register
+    SSTATEEN0       = 'h10C,  // Supervisor state enable 0
+    SSTATEEN1       = 'h10D,  // Supervisor state enable 1
+    SSTATEEN2       = 'h10E,  // Supervisor state enable 2
+    SSTATEEN3       = 'h10F,  // Supervisor state enable 3
     // Supervisor Trap Handling
     SSCRATCH        = 'h140,  // Scratch register for supervisor trap handlers
     SEPC            = 'h141,  // Supervisor exception program counter
     SCAUSE          = 'h142,  // Supervisor trap cause
     STVAL           = 'h143,  // Supervisor bad address or instruction
     SIP             = 'h144,  // Supervisor interrupt pending
+    STIMECMP        = 'h14D,  // Supervisor timer compare
+    STIMECMPH       = 'h15D,  // Upper 32 bits of stimecmp, RV32 only
     // Supervisor Protection and Translation
     SATP            = 'h180,  // Supervisor address translation and protection
+    // Supervisor counter overflow
+    SCOUNTOVF       = 'hDA0,  // Local counter-overflow status
     // Supervisor Debug/Trace Register
     SCONTEXT        = 'h5A8,  // Supervisor environment configuration register.
     // Hypervisor Trap Setup register
@@ -918,6 +1078,14 @@ package riscv_instr_pkg;
     MTVEC           = 'h305,  // Machine trap-handler base address
     MCOUNTEREN      = 'h306,  // Machine counter enable
     MSTATUSH        = 'h310,  // Additional machine status register, RV32 only
+    MSTATEEN0       = 'h30C,  // Machine state enable 0
+    MSTATEEN1       = 'h30D,  // Machine state enable 1
+    MSTATEEN2       = 'h30E,  // Machine state enable 2
+    MSTATEEN3       = 'h30F,  // Machine state enable 3
+    MSTATEEN0H      = 'h31C,  // Upper 32 bits of mstateen0, RV32 only
+    MSTATEEN1H      = 'h31D,  // Upper 32 bits of mstateen1, RV32 only
+    MSTATEEN2H      = 'h31E,  // Upper 32 bits of mstateen2, RV32 only
+    MSTATEEN3H      = 'h31F,  // Upper 32 bits of mstateen3, RV32 only
     // Machine Trap Handling
     MSCRATCH        = 'h340,  // Scratch register for machine trap handlers
     MEPC            = 'h341,  // Machine exception program counter
@@ -1102,6 +1270,36 @@ package riscv_instr_pkg;
     MHPMEVENT29     = 'h33D,  // Machine performance-monitoring event selector
     MHPMEVENT30     = 'h33E,  // Machine performance-monitoring event selector
     MHPMEVENT31     = 'h33F,  // Machine performance-monitoring event selector
+    // Upper 32 bits of mhpmevent3-31, RV32 Sscofpmf only
+    MHPMEVENT3H     = 'h723,
+    MHPMEVENT4H     = 'h724,
+    MHPMEVENT5H     = 'h725,
+    MHPMEVENT6H     = 'h726,
+    MHPMEVENT7H     = 'h727,
+    MHPMEVENT8H     = 'h728,
+    MHPMEVENT9H     = 'h729,
+    MHPMEVENT10H    = 'h72A,
+    MHPMEVENT11H    = 'h72B,
+    MHPMEVENT12H    = 'h72C,
+    MHPMEVENT13H    = 'h72D,
+    MHPMEVENT14H    = 'h72E,
+    MHPMEVENT15H    = 'h72F,
+    MHPMEVENT16H    = 'h730,
+    MHPMEVENT17H    = 'h731,
+    MHPMEVENT18H    = 'h732,
+    MHPMEVENT19H    = 'h733,
+    MHPMEVENT20H    = 'h734,
+    MHPMEVENT21H    = 'h735,
+    MHPMEVENT22H    = 'h736,
+    MHPMEVENT23H    = 'h737,
+    MHPMEVENT24H    = 'h738,
+    MHPMEVENT25H    = 'h739,
+    MHPMEVENT26H    = 'h73A,
+    MHPMEVENT27H    = 'h73B,
+    MHPMEVENT28H    = 'h73C,
+    MHPMEVENT29H    = 'h73D,
+    MHPMEVENT30H    = 'h73E,
+    MHPMEVENT31H    = 'h73F,
     // Debug/Trace Registers (shared with Debug Mode)
     TSELECT         = 'h7A0,  // Debug/Trace trigger register select
     TDATA1          = 'h7A1,  // First Debug/Trace trigger data register
@@ -1117,8 +1315,9 @@ package riscv_instr_pkg;
     DSCRATCH0       = 'h7B2,  // Debug scratch register
     DSCRATCH1       = 'h7B3,  // Debug scratch register (last one)
     VSTART          = 'h008,  // Vector start position
-    VXSTAT          = 'h009,  // Fixed point saturate flag
-    VXRM            = 'h00A,  // Fixed point rounding mode
+    VXSAT           = 'h009,  // Fixed-point saturation flag
+    VXRM            = 'h00A,  // Fixed-point rounding mode
+    VCSR            = 'h00F,  // Vector fixed-point control/status
     VL              = 'hC20,  // Vector length
     VTYPE           = 'hC21,  // Vector data type register
     VLENB           = 'hC22   // VLEN/8 (vector register length in bytes)
@@ -1176,7 +1375,8 @@ package riscv_instr_pkg;
     M_TIMER_INTR     = 4'h7,
     U_EXTERNAL_INTR  = 4'h8,
     S_EXTERNAL_INTR  = 4'h9,
-    M_EXTERNAL_INTR  = 4'hB
+    M_EXTERNAL_INTR  = 4'hB,
+    LOCAL_COUNTER_OVERFLOW_INTR = 4'hD
   } interrupt_cause_t;
 
   typedef enum bit [3:0] {
@@ -1304,7 +1504,9 @@ package riscv_instr_pkg;
   typedef struct packed {
     bit ill;
     bit fractional_lmul;
-    bit [XLEN-2:7] reserved;
+    bit [XLEN-2:9] reserved;
+    bit vma;
+    bit vta;
     int vediv;
     int vsew;
     int vlmul;
@@ -1483,8 +1685,16 @@ package riscv_instr_pkg;
   function automatic void get_hex_arg_value(string cmdline_str,
                                             ref bit [XLEN - 1 : 0] val);
     string s;
+    bit [XLEN - 1 : 0] parsed_val;
     if(inst.get_arg_value(cmdline_str, s)) begin
-      val = s.atohex();
+      // string.atohex() returns a 32-bit signed integer.  Assigning an address
+      // with bit 31 set to an RV64 value therefore sign-extends it.  Scan into
+      // an XLEN-wide packed value so command-line addresses stay unsigned.
+      if ($sscanf(s, "%h", parsed_val) != 1) begin
+        `uvm_fatal("riscv_instr_pkg", $sformatf(
+            "Invalid hexadecimal value (%0s) specified for %0s", s, cmdline_str))
+      end
+      val = parsed_val;
     end
   endfunction
 
@@ -1558,17 +1768,24 @@ package riscv_instr_pkg;
   typedef class riscv_zbs_instr;
   typedef class riscv_zcb_instr;
   typedef class riscv_b_instr;
+  typedef class riscv_scalar_ext_instr;
+  typedef class riscv_vector_set_instr;
+  typedef class riscv_zvbb_instr;
   `include "riscv_instr_gen_config.sv"
   `include "isa/riscv_instr.sv"
+  `include "isa/riscv_svinval_instr.sv"
   `include "isa/riscv_amo_instr.sv"
   `include "isa/riscv_zba_instr.sv"
   `include "isa/riscv_zbb_instr.sv"
   `include "isa/riscv_zbc_instr.sv"
   `include "isa/riscv_zbs_instr.sv"
   `include "isa/riscv_b_instr.sv"
+  `include "isa/riscv_scalar_ext_instr.sv"
   `include "isa/riscv_csr_instr.sv"
   `include "isa/riscv_floating_point_instr.sv"
+  `include "isa/riscv_vector_set_instr.sv"
   `include "isa/riscv_vector_instr.sv"
+  `include "isa/riscv_zvbb_instr.sv"
   `include "isa/riscv_compressed_instr.sv"
   `include "isa/rv32a_instr.sv"
   `include "isa/rv32c_instr.sv"
@@ -1582,6 +1799,7 @@ package riscv_instr_pkg;
   `include "isa/rv32zbb_instr.sv"
   `include "isa/rv32zbc_instr.sv"
   `include "isa/rv32zbs_instr.sv"
+  `include "isa/rv_scalar_ext_instr.sv"
   `include "isa/riscv_zcb_instr.sv"
   `include "isa/rv32zcb_instr.sv"
   `include "isa/rv64zcb_instr.sv"

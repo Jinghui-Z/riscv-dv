@@ -183,6 +183,9 @@ class riscv_instr_gen_config extends uvm_object;
   // Directed boot privileged mode, u, m, s
   string                 boot_mode_opts;
   int                    enable_page_table_exception;
+  // 0: legacy mixed page-table faults, 1: Svade A=0 only, 2: Svade D=0 only.
+  int                    svade_fault_mode = 0;
+  bit                    enable_svpbmt = 1'b0;
   bit                    no_directed_instr;
   // A name suffix for the generated assembly program
   string                 asm_test_suffix;
@@ -210,6 +213,11 @@ class riscv_instr_gen_config extends uvm_object;
   bit                    randomize_csr = 0;
   // sfence support
   bit                    allow_sfence_exception = 0;
+  // Report xTVAL through the signature handshake for architectural checking
+  // (Sstvala). Disabled by default to preserve existing testbench traffic.
+  bit                    enable_tval_check = 1'b0;
+  // Enable the Sscofpmf local-counter-overflow interrupt path.
+  bit                    enable_sscofpmf = 1'b0;
   // Interrupt/Exception Delegation
   bit                    no_delegation = 1;
   bit                    force_m_delegation = 0;
@@ -255,6 +263,14 @@ class riscv_instr_gen_config extends uvm_object;
   bit                    enable_floating_point;
   // Vector extension support
   bit                    enable_vector_extension;
+  // Select the ratified V 1.0 assembly syntax and instruction set.
+  bit                    use_vector_1_0 = 1'b0;
+  bit                    use_vsetivli = 1'b1;
+  // Random VSET instructions can desynchronize the DUT vector state from
+  // vector_cfg. Keep them out of normal streams; state-aware setup still
+  // emits all supported VSET forms.
+  bit                    enable_random_vset_instr = 1'b0;
+  bit                    enable_zvbb_extension = 1'b0;
   // Only generate vector instructions
   bit                    vector_instr_only;
   // Bit manipulation extension support
@@ -263,8 +279,42 @@ class riscv_instr_gen_config extends uvm_object;
   bit                    enable_zba_extension;
   bit                    enable_zbb_extension;
   bit                    enable_zbc_extension;
+  bit                    enable_zbkc_extension;
   bit                    enable_zbs_extension;
   bit                    enable_zcb_extension;
+  bit                    enable_svinval_extension = 1'b0;
+
+  // Platform interrupt-controller integration. These are disabled by default
+  // so existing targets retain their testbench handshake behavior.
+  bit                    enable_aclint_init = 1'b0;
+  bit [XLEN-1:0]         aclint_msip_addr = '0;
+  int                    aclint_msip_stride = 4;
+  bit [XLEN-1:0]         aclint_mtimecmp_addr = '0;
+  int                    aclint_mtimecmp_stride = 8;
+  bit                    enable_plic_claim_complete = 1'b0;
+  // Per-privilege PLIC contexts. plic_claim_complete_addr is retained as a
+  // backwards-compatible fallback for targets with a single context.
+  bit [XLEN-1:0]         plic_claim_complete_addr = '0;
+  bit [XLEN-1:0]         plic_m_claim_complete_addr = '0;
+  bit [XLEN-1:0]         plic_s_claim_complete_addr = '0;
+  int                    plic_hart_stride = 0;
+
+  // Ratified scalar extensions without a MISA bit.
+  bit                    enable_zicond_extension;
+  bit                    enable_zimop_extension;
+  bit                    enable_zcmop_extension;
+  bit                    enable_zicbom_extension;
+  bit                    enable_zicbop_extension;
+  bit                    enable_zicboz_extension;
+  bit                    enable_zbkb_extension;
+  bit                    enable_zbkx_extension;
+  bit                    enable_zknd_extension;
+  bit                    enable_zkne_extension;
+  bit                    enable_zknh_extension;
+  bit                    enable_zksed_extension;
+  bit                    enable_zksh_extension;
+  bit                    enable_zkn_extension;
+  bit                    enable_zks_extension;
 
   b_ext_group_t          enable_bitmanip_groups[] = {ZBB, ZBS, ZBP, ZBE, ZBF, ZBC, ZBR, ZBM, ZBT,
                                                      ZB_TMP};
@@ -283,13 +333,29 @@ class riscv_instr_gen_config extends uvm_object;
     foreach(sub_program_instr_cnt[i]) {
       sub_program_instr_cnt[i] inside {[10 : instr_cnt]};
     }
-    // Disable sfence if the program is not boot to supervisor mode
-    // If sfence exception is allowed, we can enable sfence instruction in any priviledged mode.
-    // When MSTATUS.TVM is set, executing sfence.vma will be treate as illegal instruction
-    if(allow_sfence_exception) {
+    // Svinval shares the SFENCE enable path.  Keep the extension reachable
+    // and legal when explicitly requested instead of leaving enable_sfence
+    // and mstatus.TVM to an unlucky random choice.
+    if (enable_svinval_extension) {
+      if (no_fence) {
+        enable_sfence == 1'b0;
+      } else {
+        enable_sfence == 1'b1;
+      }
+      if (!allow_sfence_exception) {
+        init_privileged_mode != USER_MODE;
+      }
+      if (init_privileged_mode == SUPERVISOR_MODE) {
+        mstatus_tvm == allow_sfence_exception;
+      }
+    } else if(allow_sfence_exception) {
+      // If sfence exceptions are requested, enable the instruction in any
+      // privilege mode and force TVM when executing from S-mode.
       enable_sfence == 1'b1;
       (init_privileged_mode != SUPERVISOR_MODE) || (mstatus_tvm == 1'b1);
     } else {
+      // Otherwise preserve the legacy rule that random SFENCE.VMA is only
+      // enabled for a legal S-mode program.
       (init_privileged_mode != SUPERVISOR_MODE || !riscv_instr_pkg::support_sfence || mstatus_tvm
           || no_fence) -> (enable_sfence == 1'b0);
     }
@@ -403,8 +469,16 @@ class riscv_instr_gen_config extends uvm_object;
       if(!support_supervisor_mode || no_delegation) {
         m_mode_interrupt_delegation[i] == 0;
       }
-      if(!(i inside {S_SOFTWARE_INTR, S_TIMER_INTR, S_EXTERNAL_INTR})) {
+      if(!(i inside {S_SOFTWARE_INTR, S_TIMER_INTR, S_EXTERNAL_INTR,
+                     LOCAL_COUNTER_OVERFLOW_INTR})) {
         m_mode_interrupt_delegation[i] == 0;
+      }
+      if ((i == LOCAL_COUNTER_OVERFLOW_INTR) && !enable_sscofpmf) {
+        m_mode_interrupt_delegation[i] == 0;
+      }
+      if ((i == LOCAL_COUNTER_OVERFLOW_INTR) && enable_sscofpmf &&
+          !no_delegation && (init_privileged_mode != MACHINE_MODE)) {
+        m_mode_interrupt_delegation[i] == 1;
       }
     }
   }
@@ -464,6 +538,7 @@ class riscv_instr_gen_config extends uvm_object;
       mstatus_fs == 2'b01;
     } else {
       mstatus_fs == 2'b00;
+      vector_cfg.vec_fp == 1'b0;
     }
   }
 
@@ -505,6 +580,8 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_array_enum(privileged_reg_t, remove_csr_write, UVM_DEFAULT)
     `uvm_field_string(boot_mode_opts, UVM_DEFAULT)
     `uvm_field_int(enable_page_table_exception, UVM_DEFAULT)
+    `uvm_field_int(svade_fault_mode, UVM_DEFAULT)
+    `uvm_field_int(enable_svpbmt, UVM_DEFAULT)
     `uvm_field_int(no_directed_instr, UVM_DEFAULT)
     `uvm_field_int(enable_interrupt, UVM_DEFAULT)
     `uvm_field_int(enable_timer_irq, UVM_DEFAULT)
@@ -515,6 +592,8 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_int(enable_dummy_csr_write, UVM_DEFAULT)
     `uvm_field_int(randomize_csr, UVM_DEFAULT)
     `uvm_field_int(allow_sfence_exception, UVM_DEFAULT)
+    `uvm_field_int(enable_tval_check, UVM_DEFAULT)
+    `uvm_field_int(enable_sscofpmf, UVM_DEFAULT)
     `uvm_field_int(no_delegation, UVM_DEFAULT)
     `uvm_field_int(force_m_delegation, UVM_DEFAULT)
     `uvm_field_int(force_s_delegation, UVM_DEFAULT)
@@ -535,16 +614,53 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_int(max_directed_instr_stream_seq, UVM_DEFAULT)
     `uvm_field_int(enable_floating_point, UVM_DEFAULT)
     `uvm_field_int(enable_vector_extension, UVM_DEFAULT)
+    `uvm_field_int(use_vector_1_0, UVM_DEFAULT)
+    `uvm_field_int(use_vsetivli, UVM_DEFAULT)
+    `uvm_field_int(enable_random_vset_instr, UVM_DEFAULT)
+    `uvm_field_int(enable_zvbb_extension, UVM_DEFAULT)
     `uvm_field_int(vector_instr_only, UVM_DEFAULT)
     `uvm_field_int(enable_b_extension, UVM_DEFAULT)
     `uvm_field_array_enum(b_ext_group_t, enable_bitmanip_groups, UVM_DEFAULT)
     `uvm_field_int(enable_zba_extension, UVM_DEFAULT)
     `uvm_field_int(enable_zbb_extension, UVM_DEFAULT)
     `uvm_field_int(enable_zbc_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zbkc_extension, UVM_DEFAULT)
     `uvm_field_int(enable_zbs_extension, UVM_DEFAULT)
     `uvm_field_int(enable_zcb_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_svinval_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_aclint_init, UVM_DEFAULT)
+    `uvm_field_int(aclint_msip_addr, UVM_DEFAULT)
+    `uvm_field_int(aclint_msip_stride, UVM_DEFAULT)
+    `uvm_field_int(aclint_mtimecmp_addr, UVM_DEFAULT)
+    `uvm_field_int(aclint_mtimecmp_stride, UVM_DEFAULT)
+    `uvm_field_int(enable_plic_claim_complete, UVM_DEFAULT)
+    `uvm_field_int(plic_claim_complete_addr, UVM_DEFAULT)
+    `uvm_field_int(plic_m_claim_complete_addr, UVM_DEFAULT)
+    `uvm_field_int(plic_s_claim_complete_addr, UVM_DEFAULT)
+    `uvm_field_int(plic_hart_stride, UVM_DEFAULT)
+    `uvm_field_int(enable_zicond_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zimop_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zcmop_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zicbom_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zicbop_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zicboz_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zbkb_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zbkx_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zknd_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zkne_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zknh_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zksed_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zksh_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zkn_extension, UVM_DEFAULT)
+    `uvm_field_int(enable_zks_extension, UVM_DEFAULT)
     `uvm_field_int(use_push_data_section, UVM_DEFAULT)
   `uvm_object_utils_end
+
+  protected function void add_supported_isa(riscv_instr_group_t isa_group);
+    if (!(isa_group inside {riscv_instr_pkg::supported_isa})) begin
+      riscv_instr_pkg::supported_isa.push_back(isa_group);
+    end
+  endfunction
 
   function new (string name = "");
     string s;
@@ -554,6 +670,8 @@ class riscv_instr_gen_config extends uvm_object;
     inst = uvm_cmdline_processor::get_inst();
     get_int_arg_value("+num_of_tests=", num_of_tests);
     get_int_arg_value("+enable_page_table_exception=", enable_page_table_exception);
+    get_int_arg_value("+svade_fault_mode=", svade_fault_mode);
+    get_bool_arg_value("+enable_svpbmt=", enable_svpbmt);
     get_bool_arg_value("+enable_interrupt=", enable_interrupt);
     get_bool_arg_value("+enable_nested_interrupt=", enable_nested_interrupt);
     get_bool_arg_value("+enable_timer_irq=", enable_timer_irq);
@@ -573,6 +691,8 @@ class riscv_instr_gen_config extends uvm_object;
     get_bool_arg_value("+enable_misaligned_instr=", enable_misaligned_instr);
     get_bool_arg_value("+enable_dummy_csr_write=", enable_dummy_csr_write);
     get_bool_arg_value("+allow_sfence_exception=", allow_sfence_exception);
+    get_bool_arg_value("+enable_tval_check=", enable_tval_check);
+    get_bool_arg_value("+enable_sscofpmf=", enable_sscofpmf);
     get_bool_arg_value("+no_data_page=", no_data_page);
     get_bool_arg_value("+no_directed_instr=", no_directed_instr);
     get_bool_arg_value("+no_fence=", no_fence);
@@ -608,12 +728,44 @@ class riscv_instr_gen_config extends uvm_object;
     get_bool_arg_value("+set_mstatus_mprv=", set_mstatus_mprv);
     get_bool_arg_value("+enable_floating_point=", enable_floating_point);
     get_bool_arg_value("+enable_vector_extension=", enable_vector_extension);
+    get_bool_arg_value("+vector_instr_only=", vector_instr_only);
     get_bool_arg_value("+enable_b_extension=", enable_b_extension);
     get_bool_arg_value("+enable_zba_extension=", enable_zba_extension);
     get_bool_arg_value("+enable_zbb_extension=", enable_zbb_extension);
     get_bool_arg_value("+enable_zbc_extension=", enable_zbc_extension);
+    get_bool_arg_value("+enable_zbkc_extension=", enable_zbkc_extension);
     get_bool_arg_value("+enable_zbs_extension=", enable_zbs_extension);
     get_bool_arg_value("+enable_zcb_extension=", enable_zcb_extension);
+    get_bool_arg_value("+enable_svinval_extension=", enable_svinval_extension);
+    get_bool_arg_value("+use_vector_1_0=", use_vector_1_0);
+    get_bool_arg_value("+use_vsetivli=", use_vsetivli);
+    get_bool_arg_value("+enable_random_vset_instr=", enable_random_vset_instr);
+    get_bool_arg_value("+enable_zvbb_extension=", enable_zvbb_extension);
+    get_bool_arg_value("+enable_aclint_init=", enable_aclint_init);
+    get_hex_arg_value("+aclint_msip_addr=", aclint_msip_addr);
+    get_int_arg_value("+aclint_msip_stride=", aclint_msip_stride);
+    get_hex_arg_value("+aclint_mtimecmp_addr=", aclint_mtimecmp_addr);
+    get_int_arg_value("+aclint_mtimecmp_stride=", aclint_mtimecmp_stride);
+    get_bool_arg_value("+enable_plic_claim_complete=", enable_plic_claim_complete);
+    get_hex_arg_value("+plic_claim_complete_addr=", plic_claim_complete_addr);
+    get_hex_arg_value("+plic_m_claim_complete_addr=", plic_m_claim_complete_addr);
+    get_hex_arg_value("+plic_s_claim_complete_addr=", plic_s_claim_complete_addr);
+    get_int_arg_value("+plic_hart_stride=", plic_hart_stride);
+    get_bool_arg_value("+enable_zicond_extension=", enable_zicond_extension);
+    get_bool_arg_value("+enable_zimop_extension=", enable_zimop_extension);
+    get_bool_arg_value("+enable_zcmop_extension=", enable_zcmop_extension);
+    get_bool_arg_value("+enable_zicbom_extension=", enable_zicbom_extension);
+    get_bool_arg_value("+enable_zicbop_extension=", enable_zicbop_extension);
+    get_bool_arg_value("+enable_zicboz_extension=", enable_zicboz_extension);
+    get_bool_arg_value("+enable_zbkb_extension=", enable_zbkb_extension);
+    get_bool_arg_value("+enable_zbkx_extension=", enable_zbkx_extension);
+    get_bool_arg_value("+enable_zknd_extension=", enable_zknd_extension);
+    get_bool_arg_value("+enable_zkne_extension=", enable_zkne_extension);
+    get_bool_arg_value("+enable_zknh_extension=", enable_zknh_extension);
+    get_bool_arg_value("+enable_zksed_extension=", enable_zksed_extension);
+    get_bool_arg_value("+enable_zksh_extension=", enable_zksh_extension);
+    get_bool_arg_value("+enable_zkn_extension=", enable_zkn_extension);
+    get_bool_arg_value("+enable_zks_extension=", enable_zks_extension);
     cmdline_enum_processor #(b_ext_group_t)::get_array_values("+enable_bitmanip_groups=",
                                                               1'b0, enable_bitmanip_groups);
     if(inst.get_arg_value("+boot_mode=", boot_mode_opts)) begin
@@ -636,6 +788,57 @@ class riscv_instr_gen_config extends uvm_object;
     cmdline_enum_processor #(riscv_instr_group_t)::get_array_values("+march=", 1'b0, march_isa);
     if (march_isa.size != 0) riscv_instr_pkg::supported_isa = march_isa;
 
+    if (!(ZVBB inside {supported_isa})) enable_zvbb_extension = 1'b0;
+
+    // Common instructions follow the existing riscv-dv convention of living
+    // in their RV32 group.  Expand RV64 and aggregate K groups so a directed
+    // +march selection still reaches all instructions implied by the profile.
+    if (RV64ZICOND inside {supported_isa}) add_supported_isa(RV32ZICOND);
+    if (RV64ZIMOP  inside {supported_isa}) add_supported_isa(RV32ZIMOP);
+    if (RV64ZCMOP  inside {supported_isa}) add_supported_isa(RV32ZCMOP);
+    if (RV64ZICBOM inside {supported_isa}) add_supported_isa(RV32ZICBOM);
+    if (RV64ZICBOP inside {supported_isa}) add_supported_isa(RV32ZICBOP);
+    if (RV64ZICBOZ inside {supported_isa}) add_supported_isa(RV32ZICBOZ);
+    if (RV64ZBKC   inside {supported_isa}) add_supported_isa(RV32ZBKC);
+    if (RV64ZBKB   inside {supported_isa}) add_supported_isa(RV32ZBKB);
+    if (RV64ZBKX   inside {supported_isa}) add_supported_isa(RV32ZBKX);
+    if (RV64ZKND   inside {supported_isa}) add_supported_isa(RV32ZKND);
+    if (RV64ZKNE   inside {supported_isa}) add_supported_isa(RV32ZKNE);
+    if (RV64ZKNH   inside {supported_isa}) add_supported_isa(RV32ZKNH);
+    if (RV64ZKSED  inside {supported_isa}) add_supported_isa(RV32ZKSED);
+    if (RV64ZKSH   inside {supported_isa}) add_supported_isa(RV32ZKSH);
+
+    if ((RV32ZKN inside {supported_isa}) || (RV64ZKN inside {supported_isa})) begin
+      add_supported_isa(RV32ZBKB);
+      add_supported_isa(RV32ZBKX);
+      add_supported_isa(RV32ZBKC);
+      add_supported_isa(RV32ZKND);
+      add_supported_isa(RV32ZKNE);
+      add_supported_isa(RV32ZKNH);
+      if (RV64ZKN inside {supported_isa}) begin
+        add_supported_isa(RV64ZBKB);
+        add_supported_isa(RV64ZBKX);
+        add_supported_isa(RV64ZBKC);
+        add_supported_isa(RV64ZKND);
+        add_supported_isa(RV64ZKNE);
+        add_supported_isa(RV64ZKNH);
+      end
+    end
+    if ((RV32ZKS inside {supported_isa}) || (RV64ZKS inside {supported_isa})) begin
+      add_supported_isa(RV32ZBKB);
+      add_supported_isa(RV32ZBKX);
+      add_supported_isa(RV32ZBKC);
+      add_supported_isa(RV32ZKSED);
+      add_supported_isa(RV32ZKSH);
+      if (RV64ZKS inside {supported_isa}) begin
+        add_supported_isa(RV64ZBKB);
+        add_supported_isa(RV64ZBKX);
+        add_supported_isa(RV64ZBKC);
+        add_supported_isa(RV64ZKSED);
+        add_supported_isa(RV64ZKSH);
+      end
+    end
+
     if (!(RV32C inside {supported_isa})) begin
       disable_compressed_instr = 1;
     end
@@ -655,6 +858,11 @@ class riscv_instr_gen_config extends uvm_object;
       enable_zbc_extension = 0;
     end
 
+    if (!((RV32ZBKC inside {supported_isa}) ||
+          (RV64ZBKC inside {supported_isa}))) begin
+      enable_zbkc_extension = 0;
+    end
+
     if (!((RV32ZBS inside {supported_isa}) ||
           (RV64ZBS inside {supported_isa}))) begin
       enable_zbs_extension = 0;
@@ -664,6 +872,40 @@ class riscv_instr_gen_config extends uvm_object;
     if (!((RV32ZCB inside {supported_isa}) ||
           (RV64ZCB inside {supported_isa}))) begin
       enable_zcb_extension = 0;
+    end
+
+    if (!((RV32ZICOND inside {supported_isa}) || (RV64ZICOND inside {supported_isa})))
+      enable_zicond_extension = 0;
+    if (!((RV32ZIMOP inside {supported_isa}) || (RV64ZIMOP inside {supported_isa})))
+      enable_zimop_extension = 0;
+    if (!((RV32ZCMOP inside {supported_isa}) || (RV64ZCMOP inside {supported_isa})))
+      enable_zcmop_extension = 0;
+    if (!((RV32ZICBOM inside {supported_isa}) || (RV64ZICBOM inside {supported_isa})))
+      enable_zicbom_extension = 0;
+    if (!((RV32ZICBOP inside {supported_isa}) || (RV64ZICBOP inside {supported_isa})))
+      enable_zicbop_extension = 0;
+    if (!((RV32ZICBOZ inside {supported_isa}) || (RV64ZICBOZ inside {supported_isa})))
+      enable_zicboz_extension = 0;
+    if (!((RV32ZBKB inside {supported_isa}) || (RV64ZBKB inside {supported_isa})))
+      enable_zbkb_extension = 0;
+    if (!((RV32ZBKX inside {supported_isa}) || (RV64ZBKX inside {supported_isa})))
+      enable_zbkx_extension = 0;
+    if (!((RV32ZKND inside {supported_isa}) || (RV64ZKND inside {supported_isa})))
+      enable_zknd_extension = 0;
+    if (!((RV32ZKNE inside {supported_isa}) || (RV64ZKNE inside {supported_isa})))
+      enable_zkne_extension = 0;
+    if (!((RV32ZKNH inside {supported_isa}) || (RV64ZKNH inside {supported_isa})))
+      enable_zknh_extension = 0;
+    if (!((RV32ZKSED inside {supported_isa}) || (RV64ZKSED inside {supported_isa})))
+      enable_zksed_extension = 0;
+    if (!((RV32ZKSH inside {supported_isa}) || (RV64ZKSH inside {supported_isa})))
+      enable_zksh_extension = 0;
+    if (!((RV32ZKN inside {supported_isa}) || (RV64ZKN inside {supported_isa})))
+      enable_zkn_extension = 0;
+    if (!((RV32ZKS inside {supported_isa}) || (RV64ZKS inside {supported_isa})))
+      enable_zks_extension = 0;
+    if (enable_zkn_extension || enable_zks_extension) begin
+      enable_zbkc_extension = 1'b1;
     end
     vector_cfg = riscv_vector_cfg::type_id::create("vector_cfg");
     pmp_cfg = riscv_pmp_cfg::type_id::create("pmp_cfg");
@@ -742,7 +984,14 @@ class riscv_instr_gen_config extends uvm_object;
     bit support_128b;
     foreach (riscv_instr_pkg::supported_isa[i]) begin
       if (riscv_instr_pkg::supported_isa[i] inside {RV64I, RV64M, RV64A, RV64F, RV64D, RV64C,
-                                                    RV64B}) begin
+                                                    RV64B, RV64ZBA, RV64ZBB, RV64ZBC,
+                                                    RV64ZBKC, RV64ZBS, RV64ZCB, RV64ZMMUL,
+                                                    RV64ZICOND, RV64ZIMOP, RV64ZCMOP,
+                                                    RV64ZICBOM, RV64ZICBOP, RV64ZICBOZ,
+                                                    RV64ZBKB, RV64ZBKX,
+                                                    RV64ZKND, RV64ZKNE, RV64ZKNH,
+                                                    RV64ZKSED, RV64ZKSH, RV64ZKN, RV64ZKS,
+                                                    RV64X}) begin
         support_64b = 1'b1;
       end else if (riscv_instr_pkg::supported_isa[i] inside {RV128I, RV128C}) begin
         support_128b = 1'b1;
@@ -760,37 +1009,41 @@ class riscv_instr_gen_config extends uvm_object;
     if (!(support_128b || support_64b) && !(SATP_MODE inside {SV32, BARE})) begin
       `uvm_fatal(`gfn, $sformatf("SATP mode %0s is not supported for RV32G ISA", SATP_MODE.name()))
     end
+    if (enable_tval_check && !require_signature_addr) begin
+      `uvm_fatal(`gfn, "+enable_tval_check requires +require_signature_addr=1")
+    end
+    if (!(svade_fault_mode inside {[0:2]})) begin
+      `uvm_fatal(`gfn, $sformatf("Unsupported Svade fault mode %0d", svade_fault_mode))
+    end
+    if ((svade_fault_mode != 0) && !enable_page_table_exception) begin
+      `uvm_fatal(`gfn, "+svade_fault_mode requires +enable_page_table_exception=1")
+    end
+    if (enable_plic_claim_complete &&
+        (plic_claim_complete_addr == '0) &&
+        (plic_m_claim_complete_addr == '0) &&
+        (plic_s_claim_complete_addr == '0)) begin
+      `uvm_fatal(`gfn, "PLIC claim/complete requires at least one context address")
+    end
   endfunction
 
-  // Populate invalid_priv_mode_csrs with the main implemented CSRs for each supported privilege
-  // mode
-  // TODO(udi) - include performance/pmp/trigger CSRs?
+  // Populate invalid_priv_mode_csrs from the architectural privilege encoding
+  // in csr[9:8]. This also classifies trigger CSRs such as tselect correctly;
+  // their names do not carry an M-mode prefix.
   virtual function void get_invalid_priv_lvl_csr();
-    string invalid_lvl[$];
-    string csr_name;
     privileged_reg_t csr;
-    // Debug CSRs are inaccessible from all but Debug Mode, and we cannot boot into Debug Mode
-    invalid_lvl.push_back("D");
-    case (init_privileged_mode)
-      MACHINE_MODE: begin
-      end
-      SUPERVISOR_MODE: begin
-        invalid_lvl.push_back("M");
-      end
-      USER_MODE: begin
-        invalid_lvl.push_back("S");
-        invalid_lvl.push_back("M");
-      end
-      default: begin
-        `uvm_fatal(`gfn, "Unsupported initialization privilege mode")
-      end
-    endcase
+    bit invalid;
+    invalid_priv_mode_csrs.delete();
     foreach (implemented_csr[i]) begin
-      privileged_reg_t csr = implemented_csr[i];
-      csr_name = csr.name();
-      if (csr_name[0] inside {invalid_lvl}) begin
-        invalid_priv_mode_csrs.push_back(implemented_csr[i]);
-      end
+      csr = implemented_csr[i];
+      // Debug-mode CSRs are inaccessible from every normal privilege mode.
+      invalid = csr inside {[DCSR:DSCRATCH1]};
+      case (init_privileged_mode)
+        MACHINE_MODE: ;
+        SUPERVISOR_MODE: invalid |= (csr[9:8] inside {2'b10, 2'b11});
+        USER_MODE:       invalid |= (csr[9:8] != 2'b00);
+        default: `uvm_fatal(`gfn, "Unsupported initialization privilege mode")
+      endcase
+      if (invalid) invalid_priv_mode_csrs.push_back(csr);
     end
   endfunction
 

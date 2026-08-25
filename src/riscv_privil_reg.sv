@@ -55,6 +55,12 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         privil_level = M_LEVEL;
         add_field("HART_ID", XLEN, WPRI);
       end
+      // Machine configuration pointer. A zero value indicates that no
+      // configuration data structure is provided.
+      MCONFIGPTR: begin
+        privil_level = M_LEVEL;
+        add_field("CONFIG_PTR", XLEN, WPRI);
+      end
       // Machine Status Register
       MSTATUS: begin
         privil_level = M_LEVEL;
@@ -129,7 +135,9 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("SEIP", 1, WARL);
         add_field("WARL2", 1, WARL);
         add_field("MEIP", 1, WARL);
-        add_field("WARL3", XLEN-12, WARL);
+        add_field("WPRI3", 1, WPRI);
+        add_field("LCOFI", 1, WARL);
+        add_field("WARL3", XLEN-14, WARL);
       end
       // Machine trap-enable register
       MIP: begin
@@ -146,7 +154,9 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("SEIP",   1,  WARL);
         add_field("WPRI2",  1,  WPRI);
         add_field("MEIP",   1,  WARL);
-        add_field("WPRI3",  XLEN - 12,  WPRI);
+        add_field("WPRI3",  1,  WPRI);
+        add_field("LCOFIP", 1,  WARL);
+        add_field("WPRI4",  XLEN - 14,  WPRI);
       end
       // Machine interrupt-enable register
       MIE: begin
@@ -163,37 +173,80 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("SEIE",   1,  WARL);
         add_field("WPRI2",  1,  WPRI);
         add_field("MEIE",   1,  WARL);
-        add_field("WPRI3",  XLEN - 12,  WPRI);
+        add_field("WPRI3",  1,  WPRI);
+        add_field("LCOFIE", 1,  WARL);
+        add_field("WPRI4",  XLEN - 14,  WPRI);
       end
       // Cycle Count Register
       MCYCLE: begin
         privil_level = M_LEVEL;
-        add_field("MCYCLE", 64, WPRI);
+        add_field("MCYCLE", XLEN, WARL);
       end
       // Instruction Count Register
       MINSTRET: begin
         privil_level = M_LEVEL;
-        add_field("MINSTRET", 64, WPRI);
+        add_field("MINSTRET", XLEN, WARL);
       end
       // Cycle Count Register - RV32I only
       MCYCLEH: begin
         privil_level = M_LEVEL;
-        add_field("MCYCLEH", 32, WPRI);
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "CSR MCYCLEH only exists in RV32.")
+        end
+        add_field("MCYCLEH", XLEN, WARL);
       end
       // Instruction Count Register - RV32I only
       MINSTRETH: begin
         privil_level = M_LEVEL;
-        add_field("MINSTRETH", 32, WPRI);
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "CSR MINSTRETH only exists in RV32.")
+        end
+        add_field("MINSTRETH", XLEN, WARL);
       end
       // Hardware Performance Monitor Counters
       [MHPMCOUNTER3:MHPMCOUNTER31]: begin
         privil_level = M_LEVEL;
         add_field($sformatf("%s", reg_name.name()), XLEN, WARL);
       end
-      // Hardware Performance Monitor Events
+      // Hardware Performance Monitor Events. Sscofpmf adds mode filters and
+      // the sticky overflow bit in the most-significant six bits.
       [MHPMEVENT3:MHPMEVENT31]: begin
         privil_level = M_LEVEL;
-        add_field($sformatf("%s", reg_name.name()), XLEN, WARL);
+        if (XLEN == 64) begin
+          add_field("EVENT", 56, WARL);
+          add_field("WPRI",  2, WPRI);
+          add_field("VUINH", 1, WARL);
+          add_field("VSINH", 1, WARL);
+          add_field("UINH",  1, WARL);
+          add_field("SINH",  1, WARL);
+          add_field("MINH",  1, WARL);
+          add_field("OF",    1, WARL);
+        end else begin
+          add_field("EVENT", XLEN, WARL);
+        end
+      end
+      // Upper half of the 64-bit event selector, provided by Sscofpmf on RV32.
+      [MHPMEVENT3H:MHPMEVENT31H]: begin
+        privil_level = M_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, $sformatf("CSR %0s only exists in RV32.", reg_name.name()))
+        end
+        add_field("EVENTH", 24, WARL);
+        add_field("WPRI",    2, WPRI);
+        add_field("VUINH",   1, WARL);
+        add_field("VSINH",   1, WARL);
+        add_field("UINH",    1, WARL);
+        add_field("SINH",    1, WARL);
+        add_field("MINH",    1, WARL);
+        add_field("OF",      1, WARL);
+      end
+      MCOUNTINHIBIT: begin
+        privil_level = M_LEVEL;
+        add_field("CY", 1, WARL);
+        add_field("WPRI0", 1, WPRI);
+        add_field("IR", 1, WARL);
+        add_field("HPM", 29, WARL);
+        if (XLEN == 64) add_field("WPRI1", 32, WPRI);
       end
       // Hardware Performance Monitor Counters - RV32I only
       [MHPMCOUNTER3H:MHPMCOUNTER31H]: begin
@@ -278,6 +331,94 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
           `uvm_fatal(`gfn, "CSR MSECCFGH only exists in RV32.")
         end
       end
+      // Machine environment configuration (Privileged Architecture 1.13).
+      MENVCFG: begin
+        privil_level = M_LEVEL;
+        add_field("FIOM", 1, WARL);
+        add_field("WPRI0", 3, WPRI);
+        add_field("CBIE", 2, WARL);
+        add_field("CBCFE", 1, WARL);
+        add_field("CBZE", 1, WARL);
+        if (XLEN == 64) begin
+          add_field("WPRI1", 53, WPRI);
+`ifdef RISCV_DV_ADUE_READ_ONLY_ZERO
+          add_field("ADUE", 1, WPRI);
+`else
+          add_field("ADUE", 1, WARL);
+`endif
+          add_field("PBMTE", 1, WARL);
+          add_field("STCE", 1, WARL);
+        end else begin
+          add_field("WPRI1", 24, WPRI);
+        end
+      end
+      MENVCFGH: begin
+        privil_level = M_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "CSR MENVCFGH only exists in RV32.")
+        end
+        add_field("WPRI0", 29, WPRI);
+`ifdef RISCV_DV_ADUE_READ_ONLY_ZERO
+        add_field("ADUE", 1, WPRI);
+`else
+        add_field("ADUE", 1, WARL);
+`endif
+        add_field("PBMTE", 1, WARL);
+        add_field("STCE", 1, WARL);
+      end
+      // Smstateen/Ssstateen. Registers 1-3 reserve bits 62:0; their SE bit
+      // controls access to the corresponding lower-privilege stateen CSR.
+      MSTATEEN0: begin
+        privil_level = M_LEVEL;
+        add_field("C", 1, WARL);
+        add_field("FCSR", 1, WARL);
+        add_field("JVT", 1, WARL);
+        if (XLEN == 64) begin
+          add_field("WPRI0", 53, WPRI);
+          add_field("P1P13", 1, WARL);
+          add_field("CONTEXT", 1, WARL);
+          add_field("IMSIC", 1, WARL);
+          add_field("AIA", 1, WARL);
+          add_field("CSRIND", 1, WARL);
+          add_field("WPRI1", 1, WPRI);
+          add_field("ENVCFG", 1, WARL);
+          add_field("SE0", 1, WARL);
+        end else begin
+          add_field("WPRI0", 29, WPRI);
+        end
+      end
+      MSTATEEN1, MSTATEEN2, MSTATEEN3: begin
+        privil_level = M_LEVEL;
+        if (XLEN == 64) begin
+          add_field("WPRI", 63, WPRI);
+          add_field("SE", 1, WARL);
+        end else begin
+          add_field("WPRI", XLEN, WPRI);
+        end
+      end
+      MSTATEEN0H: begin
+        privil_level = M_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "CSR MSTATEEN0H only exists in RV32.")
+        end
+        add_field("WPRI0", 24, WPRI);
+        add_field("P1P13", 1, WARL);
+        add_field("CONTEXT", 1, WARL);
+        add_field("IMSIC", 1, WARL);
+        add_field("AIA", 1, WARL);
+        add_field("CSRIND", 1, WARL);
+        add_field("WPRI1", 1, WPRI);
+        add_field("ENVCFG", 1, WARL);
+        add_field("SE0", 1, WARL);
+      end
+      MSTATEEN1H, MSTATEEN2H, MSTATEEN3H: begin
+        privil_level = M_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "High-half state-enable CSRs only exist in RV32.")
+        end
+        add_field("WPRI", 31, WPRI);
+        add_field("SE", 1, WARL);
+      end
       // Physical Memory Protection Configuration Register
       PMPCFG0: begin
         privil_level = M_LEVEL;
@@ -350,7 +491,8 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("SPIE",  1,  WARL);
         add_field("WPRI1", 2,  WPRI);
         add_field("SPP",   1,  WLRL);
-        add_field("WPRI2", 4,  WPRI);
+        add_field("VS",    2,  WARL);
+        add_field("WPRI2", 2,  WPRI);
         add_field("FS",    2,  WARL);
         add_field("XS",    2,  WARL);
         add_field("WPRI3", 1,  WPRI);
@@ -420,8 +562,9 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("WPRI1",  2,  WPRI);
         add_field("UEIP",   1,  WARL);
         add_field("SEIP",   1,  WARL);
-        add_field("WPRI2", 2, WPRI);
-        add_field("WPRI3",  XLEN - 12,  WPRI);
+        add_field("WPRI2", 3, WPRI);
+        add_field("LCOFIP", 1, WARL);
+        add_field("WPRI3",  XLEN - 14,  WPRI);
       end
       // Supervisor interrupt-enable register
       SIE: begin
@@ -434,7 +577,9 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("WPRI1",  2,  WPRI);
         add_field("UEIE",   1,  WARL);
         add_field("SEIE",   1,  WARL);
-        add_field("WPRI2",  XLEN - 10,  WPRI);
+        add_field("WPRI2", 3, WPRI);
+        add_field("LCOFIE", 1, WARL);
+        add_field("WPRI3", XLEN - 14, WPRI);
       end
       // Supervisor Counter Enable Register
       SCOUNTEREN: begin
@@ -475,6 +620,46 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
           add_field("WPRI",  32,  WPRI);
         end
       end
+      SENVCFG: begin
+        privil_level = S_LEVEL;
+        add_field("FIOM", 1, WARL);
+        add_field("WPRI0", 3, WPRI);
+        add_field("CBIE", 2, WARL);
+        add_field("CBCFE", 1, WARL);
+        add_field("CBZE", 1, WARL);
+        add_field("WPRI1", XLEN - 8, WPRI);
+      end
+      SSTATEEN0: begin
+        privil_level = S_LEVEL;
+        add_field("C", 1, WARL);
+        add_field("FCSR", 1, WARL);
+        add_field("JVT", 1, WARL);
+        add_field("WPRI", XLEN - 3, WPRI);
+      end
+      SSTATEEN1, SSTATEEN2, SSTATEEN3: begin
+        privil_level = S_LEVEL;
+        add_field("WPRI", XLEN, WPRI);
+      end
+      STIMECMP: begin
+        privil_level = S_LEVEL;
+        add_field("TIMECMP", XLEN, WARL);
+      end
+      STIMECMPH: begin
+        privil_level = S_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "CSR STIMECMPH only exists in RV32.")
+        end
+        add_field("TIMECMPH", XLEN, WARL);
+      end
+      SCOUNTOVF: begin
+        privil_level = S_LEVEL;
+        add_field("WPRI0", 3, WPRI);
+        // scountovf is a read-only shadow of mhpmevent3-31.OF.  The lightweight
+        // register model has no read-only field type, so do not randomize it as
+        // writable architectural state.
+        add_field("OFVEC", 29, WPRI);
+        if (XLEN == 64) add_field("WPRI1", 32, WPRI);
+      end
       // Supervisor Scratch Register
       SSCRATCH: begin
         privil_level = S_LEVEL;
@@ -509,6 +694,58 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
           add_field("ASID", 16, WARL);
           add_field("MODE", 4,  WARL);
         end
+      end
+      // Debug trigger CSRs (Sdtrig) and external debug CSRs (Sdext).
+      TSELECT: begin
+        privil_level = M_LEVEL;
+        add_field("INDEX", XLEN, WARL);
+      end
+      TDATA1, TDATA2, TDATA3: begin
+        privil_level = M_LEVEL;
+        add_field("DATA", XLEN, WARL);
+      end
+      TINFO: begin
+        privil_level = M_LEVEL;
+        add_field("INFO", XLEN, WPRI);
+      end
+      TCONTROL: begin
+        privil_level = M_LEVEL;
+        add_field("WPRI0", 3, WPRI);
+        add_field("MTE", 1, WARL);
+        add_field("WPRI1", 3, WPRI);
+        add_field("MPTE", 1, WARL);
+        add_field("WPRI2", XLEN - 8, WPRI);
+      end
+      MCONTEXT, MSCONTEXT: begin
+        privil_level = M_LEVEL;
+        add_field("CONTEXT", XLEN, WARL);
+      end
+      SCONTEXT: begin
+        privil_level = S_LEVEL;
+        add_field("CONTEXT", XLEN, WARL);
+      end
+      DCSR: begin
+        privil_level = M_LEVEL;
+        add_field("PRV", 2, WARL);
+        add_field("STEP", 1, WARL);
+        add_field("NMIP", 1, WPRI);
+        add_field("MPRVEN", 1, WARL);
+        add_field("V", 1, WPRI);
+        add_field("CAUSE", 3, WPRI);
+        add_field("STOPTIME", 1, WARL);
+        add_field("STOPCOUNT", 1, WARL);
+        add_field("STEPIE", 1, WARL);
+        add_field("EBREAKU", 1, WARL);
+        add_field("EBREAKS", 1, WARL);
+        add_field("WPRI0", 1, WPRI);
+        add_field("EBREAKM", 1, WARL);
+        add_field("WPRI1", 12, WPRI);
+        add_field("XDEBUGVER", 4, WPRI);
+        if (XLEN == 64) add_field("WPRI2", 32, WPRI);
+      end
+      DPC, DSCRATCH0, DSCRATCH1: begin
+        privil_level = M_LEVEL;
+        add_field("DATA", XLEN, WARL);
       end
       /////////////// User mode reigster //////////////
       // User Status Register
@@ -566,6 +803,62 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
       UTVAL: begin
         privil_level = U_LEVEL;
         add_field("VALUE",  XLEN,  WARL);
+      end
+      // Unprivileged counters and architectural extension state.
+      [CYCLE:HPMCOUNTER31]: begin
+        privil_level = U_LEVEL;
+        add_field($sformatf("%s", reg_name.name()), XLEN, WPRI);
+      end
+      [CYCLEH:HPMCOUNTER31H]: begin
+        privil_level = U_LEVEL;
+        if (XLEN != 32) begin
+          `uvm_fatal(`gfn, "High-half counter CSRs only exist in RV32.")
+        end
+        add_field($sformatf("%s", reg_name.name()), XLEN, WPRI);
+      end
+      FFLAGS: begin
+        privil_level = U_LEVEL;
+        add_field("FFLAGS", 5, WARL);
+        add_field("WPRI", XLEN - 5, WPRI);
+      end
+      FRM: begin
+        privil_level = U_LEVEL;
+        add_field("FRM", 3, WARL);
+        add_field("WPRI", XLEN - 3, WPRI);
+      end
+      FCSR: begin
+        privil_level = U_LEVEL;
+        add_field("FFLAGS", 5, WARL);
+        add_field("FRM", 3, WARL);
+        add_field("WPRI", XLEN - 8, WPRI);
+      end
+      VSTART: begin
+        privil_level = U_LEVEL;
+        add_field("VSTART", XLEN, WARL);
+      end
+      VXSAT: begin
+        privil_level = U_LEVEL;
+        add_field("VXSAT", 1, WARL);
+        add_field("WPRI", XLEN - 1, WPRI);
+      end
+      VXRM: begin
+        privil_level = U_LEVEL;
+        add_field("VXRM", 2, WARL);
+        add_field("WPRI", XLEN - 2, WPRI);
+      end
+      VCSR: begin
+        privil_level = U_LEVEL;
+        add_field("VXSAT", 1, WARL);
+        add_field("VXRM", 2, WARL);
+        add_field("WPRI", XLEN - 3, WPRI);
+      end
+      VL, VTYPE: begin
+        privil_level = U_LEVEL;
+        add_field("VALUE", XLEN, WPRI);
+      end
+      VLENB: begin
+        privil_level = U_LEVEL;
+        add_field("VLENB", XLEN, WPRI);
       end
       default:
         `uvm_fatal(get_full_name(), $sformatf("reg %0s is not supported yet", reg_name.name()))

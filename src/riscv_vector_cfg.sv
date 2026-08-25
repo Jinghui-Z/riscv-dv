@@ -34,6 +34,10 @@ class riscv_vector_cfg extends uvm_object;
   // Allow vector floating-point instructions (Allows vtype.vsew to be set <16 or >32).
   rand bit vec_fp;
 
+  // Full V targets with D can opt into 64-bit vector floating-point elements.
+  // Keep the legacy default at SEW=32 unless explicitly enabled.
+  bit enable_vec_fp64;
+
   // Allow vector narrowing or widening instructions.
   rand bit vec_narrowing_widening;
 
@@ -61,19 +65,30 @@ class riscv_vector_cfg extends uvm_object;
   rand bit enable_zvlsseg = 1'b1;
 
   // Enable fault only first load ops
+  // Preserve the legacy randomized default. Ratified V 1.0 targets can pin
+  // this knob to one when they want the mandatory FOF instructions covered.
   rand bit enable_fault_only_first_load;
 
   constraint legal_c {
     solve vtype before vl;
     solve vl before vstart;
     vstart inside {[0:vl]};
-    vl inside {[1:VLEN/vtype.vsew]};
+    if (vtype.fractional_lmul) {
+      vtype.vlmul * vtype.vsew <= VLEN;
+      vl inside {[1:(VLEN/vtype.vsew)/vtype.vlmul]};
+    } else {
+      vl inside {[1:(VLEN/vtype.vsew)*vtype.vlmul]};
+    }
   }
 
   // Basic constraint for initial bringup
   constraint bringup_c {
     vstart == 0;
-    vl == VLEN/vtype.vsew;
+    if (vtype.fractional_lmul) {
+      vl == (VLEN/vtype.vsew)/vtype.vlmul;
+    } else {
+      vl == VLEN/vtype.vsew;
+    }
     vtype.vediv == 1;
   }
 
@@ -93,14 +108,18 @@ class riscv_vector_cfg extends uvm_object;
   constraint vsew_c {
     vtype.vsew inside {8, 16, 32, 64, 128};
     vtype.vsew <= ELEN;
-    // TODO: Determine the legal range of floating point format
-    if (vec_fp) {vtype.vsew inside {32};}
-    if (vec_narrowing_widening) {vtype.vsew < ELEN;}
+    if (vec_fp) {
+      if (enable_vec_fp64) {
+        vtype.vsew inside {32, 64};
+      } else {
+        vtype.vsew == 32;
+      }
+    }
     if (vec_quad_widening) {vtype.vsew < (ELEN >> 1);}
   }
 
   constraint vseg_c {
-    enable_zvlsseg -> (vtype.vlmul < 8);
+    (enable_zvlsseg && !vtype.fractional_lmul) -> (vtype.vlmul < 8);
   }
 
   constraint vdeiv_c {
@@ -114,6 +133,9 @@ class riscv_vector_cfg extends uvm_object;
     `uvm_field_int(vtype.vsew, UVM_DEFAULT)
     `uvm_field_int(vtype.vlmul, UVM_DEFAULT)
     `uvm_field_int(vtype.fractional_lmul, UVM_DEFAULT)
+    `uvm_field_int(vtype.vta, UVM_DEFAULT)
+    `uvm_field_int(vtype.vma, UVM_DEFAULT)
+    `uvm_field_int(enable_vec_fp64, UVM_DEFAULT)
     `uvm_field_queue_int(legal_eew, UVM_DEFAULT)
     `uvm_field_int(vl, UVM_DEFAULT)
     `uvm_field_int(vstart, UVM_DEFAULT)
@@ -125,6 +147,13 @@ class riscv_vector_cfg extends uvm_object;
 
   function new (string name = "");
     super.new(name);
+    if ($value$plusargs("vec_fp=%0d", vec_fp)) begin
+      vec_fp.rand_mode(0);
+    end
+    void'($value$plusargs("enable_vec_fp64=%0d", enable_vec_fp64));
+    if ($value$plusargs("vec_narrowing_widening=%0d", vec_narrowing_widening)) begin
+      vec_narrowing_widening.rand_mode(0);
+    end
     if ($value$plusargs("enable_zvlsseg=%0d", enable_zvlsseg)) begin
       enable_zvlsseg.rand_mode(0);
     end

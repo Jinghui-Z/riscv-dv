@@ -553,20 +553,27 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
 
   constraint eew_c {
     eew inside {cfg.vector_cfg.legal_eew};
+    if (cfg.use_vector_1_0) {
+      eew inside {8, 16, 32, 64};
+    }
   }
 
   constraint stride_byte_offset_c {
     solve eew before stride_byte_offset;
     // Keep a reasonable byte offset range to avoid vector memory address overflow
     stride_byte_offset inside {[1 : 128]};
-    stride_byte_offset % (eew / 8) == 1;
+    if (eew > 8) {
+      stride_byte_offset % (eew / 8) == 1;
+    }
   }
 
   constraint index_addr_c {
     solve eew before index_addr;
     // Keep a reasonable index address range to avoid vector memory address overflow
     index_addr inside {[0 : 128]};
-    index_addr % (eew / 8) == 1;
+    if (eew > 8) {
+      index_addr % (eew / 8) == 1;
+    }
   }
 
   constraint vec_rs_c {
@@ -600,10 +607,14 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
       add_init_vector_gpr_instr(vs2_reg, index_addr);
     end
     super.post_randomize();
+    // The index reservation is only needed while this stream's mixed
+    // instructions are created. Do not leak it into the main random stream.
+    cfg.vector_cfg.reserved_vregs.delete();
   endfunction
 
   virtual function void randomize_addr();
     int ss = address_span();
+    int element_bytes = data_element_bytes();
     bit success;
 
     repeat (10) begin
@@ -625,16 +636,51 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
     end
 
     `DV_CHECK_STD_RANDOMIZE_WITH_FATAL(base, base inside {[0 : max_load_store_addr]};
-                                             base % eew == 0;)
+                                             base % element_bytes == 0;)
   endfunction
 
   virtual function int address_span();
-    int num_elements = VLEN * cfg.vector_cfg.vtype.vlmul / cfg.vector_cfg.vtype.vsew;
-    case (address_mode)
-      UNIT_STRIDED : address_span = num_elements * stride_bytes();
-      STRIDED      : address_span = num_elements * stride_byte_offset;
-      INDEXED      : address_span = index_addr + num_elements * stride_bytes();
-    endcase
+    int num_elements = cfg.vector_cfg.vl;
+    int num_fields;
+    int record_bytes;
+    if (load_store_instr.is_whole_register_mem) begin
+      address_span = load_store_instr.whole_register_count * VLEN / 8;
+    end else if (load_store_instr.is_mask_register_mem) begin
+      address_span = (num_elements + 7) / 8;
+    end else begin
+      num_fields = (load_store_instr.sub_extension == "zvlsseg") ?
+                   load_store_instr.nfields + 1 : 1;
+      record_bytes = num_fields * data_element_bytes();
+      case (address_mode)
+        UNIT_STRIDED : address_span = num_elements * record_bytes;
+        STRIDED      : address_span = (num_elements - 1) * stride_byte_offset + record_bytes;
+        // The stream currently initializes every index element to index_addr.
+        INDEXED      : address_span = index_addr + record_bytes;
+      endcase
+    end
+  endfunction
+
+  virtual function int data_element_bytes();
+    // V 1.0 indexed instructions encode the index EEW while data elements use
+    // the current SEW. Other memory forms encode the data EEW directly.
+    if (cfg.use_vector_1_0 && (address_mode == INDEXED)) begin
+      data_element_bytes = cfg.vector_cfg.vtype.vsew / 8;
+    end else begin
+      data_element_bytes = eew / 8;
+    end
+  endfunction
+
+  virtual function int segment_data_emul();
+    int value;
+    if (cfg.use_vector_1_0 && (address_mode == INDEXED)) begin
+      value = cfg.vector_cfg.vtype.fractional_lmul ?
+              1 : cfg.vector_cfg.vtype.vlmul;
+    end else if (cfg.vector_cfg.vtype.fractional_lmul) begin
+      value = eew / (cfg.vector_cfg.vtype.vsew * cfg.vector_cfg.vtype.vlmul);
+    end else begin
+      value = (eew * cfg.vector_cfg.vtype.vlmul) / cfg.vector_cfg.vtype.vsew;
+    end
+    segment_data_emul = (value < 1) ? 1 : value;
   endfunction
 
   virtual function int stride_bytes();
@@ -652,10 +698,28 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
     case (address_mode)
       UNIT_STRIDED : begin
         allowed_instr = {VLE_V, VSE_V, allowed_instr};
+        if (cfg.use_vector_1_0) begin
+          allowed_instr = {VLM_V, VSM_V,
+                           VL1RE8_V, VL2RE8_V, VL4RE8_V, VL8RE8_V,
+                           VS1R_V, VS2R_V, VS4R_V, VS8R_V,
+                           allowed_instr};
+          if (ELEN >= 16) begin
+            allowed_instr = {VL1RE16_V, VL2RE16_V, VL4RE16_V, VL8RE16_V,
+                             allowed_instr};
+          end
+          if (ELEN >= 32) begin
+            allowed_instr = {VL1RE32_V, VL2RE32_V, VL4RE32_V, VL8RE32_V,
+                             allowed_instr};
+          end
+          if (ELEN >= 64) begin
+            allowed_instr = {VL1RE64_V, VL2RE64_V, VL4RE64_V, VL8RE64_V,
+                             allowed_instr};
+          end
+        end
         if (cfg.vector_cfg.enable_fault_only_first_load) begin
           allowed_instr = {VLEFF_V, allowed_instr};
         end
-        if (cfg.vector_cfg.enable_zvlsseg) begin
+        if (cfg.vector_cfg.enable_zvlsseg && (segment_data_emul() <= 4)) begin
           allowed_instr = {VLSEGE_V, VSSEGE_V, allowed_instr};
           if (cfg.vector_cfg.enable_fault_only_first_load) begin
             allowed_instr = {VLSEGEFF_V, allowed_instr};
@@ -664,33 +728,55 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
       end
       STRIDED : begin
         allowed_instr = {VLSE_V, VSSE_V, allowed_instr};
-        if (cfg.vector_cfg.enable_zvlsseg) begin
+        if (cfg.vector_cfg.enable_zvlsseg && (segment_data_emul() <= 4)) begin
           allowed_instr = {VLSSEGE_V, VSSSEGE_V, allowed_instr};
         end
       end
       INDEXED : begin
-        allowed_instr = {VLXEI_V, VSXEI_V, VSUXEI_V, allowed_instr};
-        if (cfg.vector_cfg.enable_zvlsseg) begin
-          allowed_instr = {VLXSEGEI_V, VSXSEGEI_V, VSUXSEGEI_V, allowed_instr};
+        if (cfg.use_vector_1_0) begin
+          allowed_instr = {VLUXEI_V, VLXEI_V, VSXEI_V, VSUXEI_V, allowed_instr};
+        end else begin
+          allowed_instr = {VLXEI_V, VSXEI_V, VSUXEI_V, allowed_instr};
+        end
+        if (cfg.vector_cfg.enable_zvlsseg && (segment_data_emul() <= 4)) begin
+          if (cfg.use_vector_1_0) begin
+            allowed_instr = {VLUXSEGEI_V, VLXSEGEI_V,
+                             VSXSEGEI_V, VSUXSEGEI_V, allowed_instr};
+          end else begin
+            allowed_instr = {VLXSEGEI_V, VSXSEGEI_V, VSUXSEGEI_V, allowed_instr};
+          end
         end
       end
     endcase
   endfunction
 
   virtual function void randomize_vec_load_store_instr();
+    // reserved_vregs protects the index register only within one directed
+    // stream. Do not carry that reservation into the next stream instance.
+    cfg.vector_cfg.reserved_vregs.delete();
     $cast(load_store_instr, riscv_instr::get_load_store_instr(allowed_instr));
     load_store_instr.m_cfg = cfg;
     load_store_instr.has_rs1 = 0;
     load_store_instr.has_vs2 = 1;
     load_store_instr.has_imm = 0;
+    // Whole-register and mask instructions have an architectural fixed EEW
+    // independent of the current vtype and of this stream's normal EEW pool.
+    if (load_store_instr.is_whole_register_mem ||
+        load_store_instr.is_mask_register_mem) begin
+      eew = load_store_instr.fixed_mem_eew;
+    end
+    // Address generation and the emitted mnemonic must use the same EEW.
+    load_store_instr.eew = eew;
+    load_store_instr.eew.rand_mode(0);
     randomize_gpr(load_store_instr);
     load_store_instr.rs1 = rs1_reg;
     load_store_instr.rs2 = rs2_reg;
-    load_store_instr.vs2 = vs2_reg;
     if (address_mode == INDEXED) begin
-      cfg.vector_cfg.reserved_vregs = {load_store_instr.vs2};
       vs2_reg = load_store_instr.vs2;
+      cfg.vector_cfg.reserved_vregs = {vs2_reg};
       `uvm_info(`gfn, $sformatf("vs2_reg = v%0d", vs2_reg), UVM_LOW)
+    end else begin
+      load_store_instr.vs2 = vs2_reg;
     end
     load_store_instr.process_load_store = 0;
   endfunction
