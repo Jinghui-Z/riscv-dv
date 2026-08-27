@@ -170,6 +170,7 @@ class riscv_instr extends uvm_object;
   endfunction : create_instr
 
   static function void build_basic_instruction_list(riscv_instr_gen_config cfg);
+    riscv_instr_name_t synch_instr[$];
     basic_instr = {instr_category[SHIFT], instr_category[ARITHMETIC],
                    instr_category[LOGICAL], instr_category[COMPARE]};
     if (!cfg.no_ebreak) begin
@@ -189,7 +190,16 @@ class riscv_instr extends uvm_object;
       basic_instr = {basic_instr, DRET};
     end
     if (cfg.no_fence == 0) begin
-      basic_instr = {basic_instr, instr_category[SYNCH]};
+      foreach (instr_category[SYNCH][i]) begin
+        // Cache-block operations require rs1 to reference a legal memory
+        // region. Generate them through riscv_cbo_instr_stream instead of the
+        // unconstrained main instruction stream.
+        if (!(instr_category[SYNCH][i] inside {
+              CBO_INVAL, CBO_CLEAN, CBO_FLUSH, CBO_ZERO})) begin
+          synch_instr.push_back(instr_category[SYNCH][i]);
+        end
+      end
+      basic_instr = {basic_instr, synch_instr};
     end
     // Preserve the legacy M-mode default, while allowing explicit legal-all
     // and invalid-privilege CSR tests to exercise CSR instructions in S/U.

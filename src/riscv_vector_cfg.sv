@@ -97,6 +97,12 @@ class riscv_vector_cfg extends uvm_object;
   constraint vlmul_c {
     vtype.vlmul inside {1, 2, 4, 8};
     vtype.vlmul <= MAX_LMUL;
+    // Fractional LMUL encodings are mf2/mf4/mf8. There is no mf1 encoding;
+    // treating that internal state as m1 would make operand constraints and
+    // the emitted VTYPE disagree.
+    if (vtype.fractional_lmul) {
+      vtype.vlmul inside {2, 4, 8};
+    }
     if (vec_narrowing_widening) {
       (vtype.vlmul < 8) || (vtype.fractional_lmul == 1'b1);
     }

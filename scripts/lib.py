@@ -22,11 +22,14 @@ import sys
 import re
 import subprocess
 import time
-import yaml
 import logging
 import signal
-
 from datetime import date
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 RET_SUCCESS = 0
 RET_FAIL    = 1
@@ -59,10 +62,30 @@ def read_yaml(yaml_file):
     Returns:
       yaml_data : data read from YAML in dictionary format
     """
+    yaml_safe_load = getattr(yaml, "safe_load", None)
+    yaml_error = getattr(yaml, "YAMLError", None)
+    valid_yaml_error = (isinstance(yaml_error, type) and
+                        issubclass(yaml_error, Exception))
+    if not callable(yaml_safe_load) or not valid_yaml_error:
+        yaml_origin = getattr(yaml, "__file__", None)
+        if yaml_origin is None and yaml is not None:
+            yaml_origin = ", ".join(str(path) for path in
+                                    getattr(yaml, "__path__", []))
+        yaml_origin = yaml_origin or "<not found>"
+        requirements_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+            "requirements.txt")
+        logging.error(
+            "PyYAML is unavailable for %s; 'import yaml' resolved to %s. "
+            "Install the repository dependencies with: %s -m pip install "
+            "-r %s",
+            sys.executable, yaml_origin, sys.executable, requirements_file)
+        sys.exit(RET_FAIL)
+
     with open(yaml_file, "r") as f:
         try:
-            yaml_data = yaml.safe_load(f)
-        except yaml.YAMLError as exc:
+            yaml_data = yaml_safe_load(f)
+        except yaml_error as exc:
             logging.error(exc)
             sys.exit(RET_FAIL)
     return yaml_data

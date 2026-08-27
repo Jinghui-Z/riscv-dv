@@ -24,14 +24,14 @@ There are two ways that you can run scripts from riscv-dv.
 For developers which may work on multiple clones in parallel, using directly run
 by `python3` script is highly recommended. Example::
 
-    pip3 install -r requirements.txt     # install dependencies (only once)
+    python3 -m pip install -r requirements.txt  # install dependencies (only once)
     python3 run.py --help
 
 For normal users, using the python package is recommended. First, cd to the directory
 where riscv-dv is cloned and run::
 
     export PATH=$HOME/.local/bin/:$PATH  # add ~/.local/bin to the $PATH (only once)
-    pip3 install --user -e .
+    python3 -m pip install --user -e .
 
 This installs riscv-dv in a mode where any changes within the repo are immediately
 available simply by running `run`/`cov`. There is no need to repeatedly run `pip install .`

@@ -173,6 +173,13 @@ class riscv_vector_instr extends riscv_floating_point_instr;
     }
   }
 
+  // Prefix-mask instructions cannot overwrite their source mask register.
+  constraint vector_mask_prefix_c {
+    if (instr_name inside {VMSBF_M, VMSIF_M, VMSOF_M}) {
+      vd != vs2;
+    }
+  }
+
   // 16.9. Vector Element Index Instruction
   // The vs2 eld of the instruction must be set to v0, otherwise the encoding is reserved
   constraint vector_element_index_c {

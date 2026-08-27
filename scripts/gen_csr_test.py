@@ -24,10 +24,9 @@ determine success or failure.
 """
 To install the bitstring library:
   1) sudo apt-get install python3-bitstring OR
-  2) pip install bitstring
+  2) python3 -m pip install bitstring
 """
 import sys
-import yaml
 import argparse
 import random
 import copy
@@ -105,41 +104,40 @@ def get_csr_map(csr_file, xlen):
     """
     rv_string = "rv{}".format(str(xlen))
     csrs = {}
-    with open(csr_file, "r") as c:
-        csr_description = yaml.safe_load(c)
-        for csr_dict in csr_description:
-            csr_name = csr_dict.get("csr")
-            csr_address = csr_dict.get("address")
-            assert (rv_string in csr_dict), "The {} CSR must be configured for rv{}".format(
-                csr_name, str(rv))
-            csr_value = bitarray(uintbe=0, length=xlen)
-            csr_write_fields = []
-            csr_read_mask = bitarray(uintbe=0, length=xlen)
-            csr_field_list = csr_dict.get(rv_string)
-            for csr_field_detail_dict in csr_field_list:
-                field_type = csr_field_detail_dict.get("type")
-                field_val = csr_field_detail_dict.get("reset_val")
-                field_msb = csr_field_detail_dict.get("msb")
-                field_lsb = csr_field_detail_dict.get("lsb")
-                field_size = field_msb - field_lsb + 1
-                if field_type != "WPRI":
-                    val_bitarray = bitarray(uint=field_val, length=field_size)
-                    mask_bitarray = bitarray(uint=1, length=1) * field_size
-                    start_pos = xlen - 1 - field_msb
-                    end_pos = xlen - 1 - field_lsb
-                    csr_read_mask.overwrite(mask_bitarray, xlen - 1 - field_msb)
-                    csr_value.overwrite(val_bitarray, xlen - 1 - field_msb)
-                    read_only = True if field_type == "R" else False
-                    if field_type == "WARL" and 'warl_legalize' in csr_field_detail_dict:
-                        csr_write_fields.append(LegalizeWriteCSRField(mask_bitarray,
-                            (start_pos, end_pos), read_only,
-                            csr_field_detail_dict['warl_legalize']))
-                    else:
-                        csr_write_fields.append(SimpleWriteCSRField(mask_bitarray,
-                            (start_pos, end_pos), read_only))
+    csr_description = read_yaml(csr_file)
+    for csr_dict in csr_description:
+        csr_name = csr_dict.get("csr")
+        csr_address = csr_dict.get("address")
+        assert (rv_string in csr_dict), "The {} CSR must be configured for rv{}".format(
+            csr_name, str(rv))
+        csr_value = bitarray(uintbe=0, length=xlen)
+        csr_write_fields = []
+        csr_read_mask = bitarray(uintbe=0, length=xlen)
+        csr_field_list = csr_dict.get(rv_string)
+        for csr_field_detail_dict in csr_field_list:
+            field_type = csr_field_detail_dict.get("type")
+            field_val = csr_field_detail_dict.get("reset_val")
+            field_msb = csr_field_detail_dict.get("msb")
+            field_lsb = csr_field_detail_dict.get("lsb")
+            field_size = field_msb - field_lsb + 1
+            if field_type != "WPRI":
+                val_bitarray = bitarray(uint=field_val, length=field_size)
+                mask_bitarray = bitarray(uint=1, length=1) * field_size
+                start_pos = xlen - 1 - field_msb
+                end_pos = xlen - 1 - field_lsb
+                csr_read_mask.overwrite(mask_bitarray, xlen - 1 - field_msb)
+                csr_value.overwrite(val_bitarray, xlen - 1 - field_msb)
+                read_only = True if field_type == "R" else False
+                if field_type == "WARL" and 'warl_legalize' in csr_field_detail_dict:
+                    csr_write_fields.append(LegalizeWriteCSRField(mask_bitarray,
+                        (start_pos, end_pos), read_only,
+                        csr_field_detail_dict['warl_legalize']))
+                else:
+                    csr_write_fields.append(SimpleWriteCSRField(mask_bitarray,
+                        (start_pos, end_pos), read_only))
 
-            csrs.update({csr_name: [csr_address, csr_value, csr_write_fields,
-                                    csr_read_mask]})
+        csrs.update({csr_name: [csr_address, csr_value, csr_write_fields,
+                                csr_read_mask]})
     return csrs
 
 

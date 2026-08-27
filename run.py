@@ -168,6 +168,14 @@ def parse_iss_yaml(iss, iss_yaml, isa, priv, setting_dir, debug_cmd):
                     # TODO: Support u/s mode
                     variant = re.sub('g', 'imafd', m.group('variant'))
                     cmd = re.sub("\<variant\>", variant, cmd)
+            elif iss == "spike":
+                # Newer Spike builds replaced --misaligned with Zicclsm.
+                # Append it only for Spike and avoid duplicating an extension
+                # already supplied by a custom target.
+                spike_isa = isa
+                if "zicclsm" not in spike_isa.split("_"):
+                    spike_isa += "_zicclsm"
+                cmd = re.sub("\<variant\>", spike_isa, cmd)
             else:
                 cmd = re.sub("\<variant\>", isa, cmd)
             cmd = re.sub("\<priv\>", priv, cmd)
@@ -192,6 +200,121 @@ def get_iss_cmd(base_cmd, elf, log):
     cmd = re.sub("\<elf\>", elf, base_cmd)
     cmd += (" &> {}".format(log))
     return cmd
+
+
+def check_spike_log(log, test):
+    """Reject unexpected illegal-instruction traps in strict Spike runs."""
+    allow_illegal = test.get('allow_iss_illegal_instr', 0)
+    if (not isinstance(allow_illegal, (bool, int)) or
+            allow_illegal not in (0, 1)):
+        logging.error(
+            "Test %s has invalid allow_iss_illegal_instr value %r; expected "
+            "integer 0 or 1",
+            test.get('test', '<unknown>'), allow_illegal)
+        sys.exit(RET_FAIL)
+    allowed_csrs = set()
+    if not allow_illegal and 'iss_allowed_illegal_csrs' in test:
+        logging.error(
+            "Test %s defines iss_allowed_illegal_csrs without "
+            "allow_iss_illegal_instr: 1", test.get('test', '<unknown>'))
+        sys.exit(RET_FAIL)
+    if allow_illegal:
+        raw_allowed_csrs = test.get('iss_allowed_illegal_csrs')
+        if not isinstance(raw_allowed_csrs, list) or not raw_allowed_csrs:
+            logging.error(
+                "Test %s enables allow_iss_illegal_instr but does not define "
+                "a non-empty iss_allowed_illegal_csrs list",
+                test.get('test', '<unknown>'))
+            sys.exit(RET_FAIL)
+        for raw_csr in raw_allowed_csrs:
+            try:
+                if isinstance(raw_csr, bool):
+                    raise ValueError
+                if isinstance(raw_csr, int):
+                    csr = raw_csr
+                elif isinstance(raw_csr, str):
+                    csr = int(raw_csr, 0)
+                else:
+                    raise ValueError
+            except ValueError:
+                logging.error(
+                    "Test %s has invalid CSR value %r in "
+                    "iss_allowed_illegal_csrs",
+                    test.get('test', '<unknown>'), raw_csr)
+                sys.exit(RET_FAIL)
+            if csr < 0 or csr > 0xfff:
+                logging.error(
+                    "Test %s has out-of-range CSR value %r in "
+                    "iss_allowed_illegal_csrs",
+                    test.get('test', '<unknown>'), raw_csr)
+                sys.exit(RET_FAIL)
+            allowed_csrs.add(csr)
+    try:
+        with open(log, 'r', errors='replace') as log_file:
+            log_lines = list(log_file)
+    except OSError as exc:
+        logging.error("Cannot inspect Spike log %s: %s", log, exc)
+        sys.exit(RET_FAIL)
+    if not any(line.strip() for line in log_lines):
+        logging.error("Spike log %s is empty", log)
+        sys.exit(RET_FAIL)
+
+    illegal_traps = [
+        (line_idx, line.rstrip())
+        for line_idx, line in enumerate(log_lines)
+        if 'exception trap_illegal_instruction' in line
+    ]
+    if not illegal_traps:
+        return
+
+    marker_count = 0
+    for trap_idx, trap_line in illegal_traps:
+        tval_match = None
+        if trap_idx + 1 < len(log_lines):
+            tval_match = re.search(r'\btval\s+0x([0-9a-fA-F]+)\b',
+                                   log_lines[trap_idx + 1])
+        if not tval_match:
+            logging.error(
+                "Spike illegal-instruction trap in %s at line %d has no tval "
+                "on the following line: %s", log, trap_idx + 1, trap_line)
+            sys.exit(RET_FAIL)
+
+        tval = int(tval_match.group(1), 16)
+        # Generated programs may reach one fixed custom test-done word before
+        # the common trap handler transfers control to tohost.
+        if tval == 0x0005006b:
+            marker_count += 1
+            if marker_count > 1:
+                logging.error(
+                    "Spike log %s contains more than one test-done marker "
+                    "illegal trap; repeated marker at line %d",
+                    log, trap_idx + 1)
+                sys.exit(RET_FAIL)
+            continue
+
+        if not allow_illegal:
+            logging.error(
+                "Unexpected Spike illegal-instruction trap in %s at line %d: "
+                "expected test-done marker tval 0x0005006b, got 0x%x: %s",
+                log, trap_idx + 1, tval, trap_line)
+            sys.exit(RET_FAIL)
+
+        opcode = tval & 0x7f
+        funct3 = (tval >> 12) & 0x7
+        csr = (tval >> 20) & 0xfff
+        if (tval > 0xffffffff or opcode != 0x73 or
+                funct3 not in (1, 2, 3, 5, 6, 7)):
+            logging.error(
+                "Unexpected non-CSR illegal instruction in Spike log %s at "
+                "line %d: tval 0x%x", log, trap_idx + 1, tval)
+            sys.exit(RET_FAIL)
+        if csr not in allowed_csrs:
+            logging.error(
+                "Unexpected CSR 0x%03x illegal instruction in Spike log %s "
+                "at line %d; allowed CSRs: %s", csr, log, trap_idx + 1,
+                ','.join("0x{:03x}".format(value)
+                         for value in sorted(allowed_csrs)))
+            sys.exit(RET_FAIL)
 
 
 def do_compile(compile_cmd, test_list, core_setting_dir, cwd, ext_dir,
@@ -469,14 +592,15 @@ def gcc_compile(test_list, output_dir, isa, mabi, opts, debug_cmd):
             run_cmd_output(cmd.split(), debug_cmd=debug_cmd)
 
 
-def run_assembly(asm_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
-                 setting_dir, debug_cmd):
+def run_assembly(asm_test, iss_yaml, isa, priv, mabi, gcc_opts, iss_opts,
+                 output_dir, setting_dir, debug_cmd):
     """Run a directed assembly test with ISS
 
     Args:
       asm_test    : Assembly test file
       iss_yaml    : ISS configuration file in YAML format
       isa         : ISA variant passed to the ISS
+      priv        : privilege modes
       mabi        : MABI variant passed to GCC
       gcc_opts    : User-defined options for GCC compilation
       iss_opts    : Instruction set simulators
@@ -521,7 +645,8 @@ def run_assembly(asm_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
         run_cmd("mkdir -p {}/{}_sim".format(output_dir, iss))
         log = ("{}/{}_sim/{}.log".format(output_dir, iss, asm))
         log_list.append(log)
-        base_cmd = parse_iss_yaml(iss, iss_yaml, isa, setting_dir, debug_cmd)
+        base_cmd = parse_iss_yaml(iss, iss_yaml, isa, priv, setting_dir,
+                                  debug_cmd)
         logging.info("[{}] Running ISS simulation: {}".format(iss, elf))
         cmd = get_iss_cmd(base_cmd, elf, log)
         run_cmd(cmd, 10, debug_cmd=debug_cmd)
@@ -530,14 +655,15 @@ def run_assembly(asm_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
         compare_iss_log(iss_list, log_list, report)
 
 
-def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
-                          output_dir, setting_dir, debug_cmd):
+def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, priv, mabi, gcc_opts,
+                          iss, output_dir, setting_dir, debug_cmd):
     """Run a directed assembly test from a directory with spike
 
     Args:
       asm_test_dir    : Assembly test file directory
       iss_yaml        : ISS configuration file in YAML format
       isa             : ISA variant passed to the ISS
+      priv            : privilege modes
       mabi            : MABI variant passed to GCC
       gcc_opts        : User-defined options for GCC compilation
       iss             : Instruction set simulators
@@ -551,7 +677,7 @@ def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
         logging.info("Found {} assembly tests under {}".format(
             len(asm_list), asm_test_dir))
         for asm_file in asm_list:
-            run_assembly(asm_file, iss_yaml, isa, mabi, gcc_opts, iss,
+            run_assembly(asm_file, iss_yaml, isa, priv, mabi, gcc_opts, iss,
                          output_dir,
                          setting_dir, debug_cmd)
             if "," in iss:
@@ -562,7 +688,7 @@ def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
             "No assembly test(*.S) found under {}".format(asm_test_dir))
 
 
-def run_c(c_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
+def run_c(c_test, iss_yaml, isa, priv, mabi, gcc_opts, iss_opts, output_dir,
           setting_dir, debug_cmd):
     """Run a directed c test with ISS
 
@@ -570,6 +696,7 @@ def run_c(c_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
       c_test      : C test file
       iss_yaml    : ISS configuration file in YAML format
       isa         : ISA variant passed to the ISS
+      priv        : privilege modes
       mabi        : MABI variant passed to GCC
       gcc_opts    : User-defined options for GCC compilation
       iss_opts    : Instruction set simulators
@@ -613,7 +740,8 @@ def run_c(c_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
         run_cmd("mkdir -p {}/{}_sim".format(output_dir, iss))
         log = ("{}/{}_sim/{}.log".format(output_dir, iss, c))
         log_list.append(log)
-        base_cmd = parse_iss_yaml(iss, iss_yaml, isa, setting_dir, debug_cmd)
+        base_cmd = parse_iss_yaml(iss, iss_yaml, isa, priv, setting_dir,
+                                  debug_cmd)
         logging.info("[{}] Running ISS simulation: {}".format(iss, elf))
         cmd = get_iss_cmd(base_cmd, elf, log)
         run_cmd(cmd, 10, debug_cmd=debug_cmd)
@@ -622,7 +750,7 @@ def run_c(c_test, iss_yaml, isa, mabi, gcc_opts, iss_opts, output_dir,
         compare_iss_log(iss_list, log_list, report)
 
 
-def run_c_from_dir(c_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
+def run_c_from_dir(c_test_dir, iss_yaml, isa, priv, mabi, gcc_opts, iss,
                    output_dir, setting_dir, debug_cmd):
     """Run a directed c test from a directory with spike
 
@@ -630,6 +758,7 @@ def run_c_from_dir(c_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
       c_test_dir      : C test file directory
       iss_yaml        : ISS configuration file in YAML format
       isa             : ISA variant passed to the ISS
+      priv            : privilege modes
       mabi            : MABI variant passed to GCC
       gcc_opts        : User-defined options for GCC compilation
       iss             : Instruction set simulators
@@ -642,7 +771,7 @@ def run_c_from_dir(c_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
         c_list = result.splitlines()
         logging.info("Found {} c tests under {}".format(len(c_list), c_test_dir))
         for c_file in c_list:
-            run_c(c_file, iss_yaml, isa, mabi, gcc_opts, iss, output_dir,
+            run_c(c_file, iss_yaml, isa, priv, mabi, gcc_opts, iss, output_dir,
                   setting_dir, debug_cmd)
             if "," in iss:
                 report = ("{}/iss_regr.log".format(output_dir)).rstrip()
@@ -652,7 +781,7 @@ def run_c_from_dir(c_test_dir, iss_yaml, isa, mabi, gcc_opts, iss,
 
 
 def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
-            isa, priv, setting_dir, timeout_s, debug_cmd):
+            isa, priv, setting_dir, timeout_s, strict_spike_log, debug_cmd):
     """Run ISS simulation with the generated test program
 
     Args:
@@ -665,6 +794,7 @@ def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
       priv        : privilege modes
       setting_dir : Generator setting directory
       timeout_s   : Timeout limit in seconds
+      strict_spike_log : Reject unexpected illegal-instruction traps from Spike
       debug_cmd   : Produce the debug cmd log without running
     """
     for iss in iss_list.split(","):
@@ -691,6 +821,8 @@ def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
                         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
                     else:
                         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
+                    if iss == "spike" and strict_spike_log and not debug_cmd:
+                        check_spike_log(log, test)
                     logging.debug(cmd)
 
 
@@ -837,8 +969,9 @@ def parse_args(cwd):
                         help="Address that privileged CSR test writes to at EOT")
     parser.add_argument("--iss_opts", type=str, default="",
                         help="Any ISS command line arguments")
-    parser.add_argument("--iss_timeout", type=int, default=10,
-                        help="ISS sim timeout limit in seconds")
+    parser.add_argument("--iss_timeout", type=int, default=None,
+                        help="ISS sim timeout limit in seconds "
+                             "(default: 120 for nanhu_v5_1, 10 otherwise)")
     parser.add_argument("--iss_yaml", type=str, default="",
                         help="ISS setting YAML")
     parser.add_argument("--simulator_yaml", type=str, default="",
@@ -992,10 +1125,17 @@ def load_config(args, cwd):
             args.mabi = "lp64d"
             if args.priv is None:
                 args.priv = "msu"
-            # The NanHu target enables additional extensions through its
-            # target settings and generator plusargs. Keep the runner ISA
-            # conservative so bundled ISS/toolchains can still parse it.
-            args.isa = "rv64imafdcv_zicsr_zifencei"
+            # GCC uses each test's narrower -march from the testlist. The ISS
+            # needs the full target profile so privileged CSR accesses and
+            # extension-specific tests are checked instead of being rejected
+            # by an artificially narrow runner ISA.
+            args.isa = (
+                "rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_"
+                "zicond_zimop_zcmop_zicbom_zicbop_zicboz_"
+                "zknd_zkne_zknh_zksed_zksh_zvbb_"
+                "zicsr_zifencei_zicntr_zihpm_smstateen_sscofpmf_"
+                "sstc_svade_svinval_svpbmt"
+            )
         else:
             sys.exit("Unsupported pre-defined target: {}".format(args.target))
     else:
@@ -1010,6 +1150,8 @@ def load_config(args, cwd):
 
     if args.priv is None:
         args.priv = "m"
+    if args.iss_timeout is None:
+        args.iss_timeout = 120 if args.target == "nanhu_v5_1" else 10
 
 
 def main():
@@ -1038,13 +1180,13 @@ def main():
                 # path_asm_test is a directory
                 if os.path.isdir(full_path):
                     run_assembly_from_dir(full_path, args.iss_yaml, args.isa,
-                                          args.mabi,
+                                          args.priv, args.mabi,
                                           args.gcc_opts, args.iss, output_dir,
                                           args.core_setting_dir, args.debug)
                 # path_asm_test is an assembly file
                 elif os.path.isfile(full_path) or args.debug:
-                    run_assembly(full_path, args.iss_yaml, args.isa, args.mabi,
-                                 args.gcc_opts,
+                    run_assembly(full_path, args.iss_yaml, args.isa, args.priv,
+                                 args.mabi, args.gcc_opts,
                                  args.iss, output_dir, args.core_setting_dir,
                                  args.debug)
                 else:
@@ -1060,13 +1202,13 @@ def main():
                 # path_c_test is a directory
                 if os.path.isdir(full_path):
                     run_c_from_dir(full_path, args.iss_yaml, args.isa,
-                                   args.mabi,
+                                   args.priv, args.mabi,
                                    args.gcc_opts, args.iss, output_dir,
                                    args.core_setting_dir, args.debug)
                 # path_c_test is a c file
                 elif os.path.isfile(full_path) or args.debug:
-                    run_c(full_path, args.iss_yaml, args.isa, args.mabi,
-                          args.gcc_opts,
+                    run_c(full_path, args.iss_yaml, args.isa, args.priv,
+                          args.mabi, args.gcc_opts,
                           args.iss, output_dir, args.core_setting_dir,
                           args.debug)
                 else:
@@ -1122,7 +1264,7 @@ def main():
                         # path_asm_test is a directory
                         if os.path.isdir(path_asm_test):
                             run_assembly_from_dir(path_asm_test, args.iss_yaml,
-                                                  args.isa, args.mabi,
+                                                  args.isa, args.priv, args.mabi,
                                                   gcc_opts, args.iss,
                                                   output_dir,
                                                   args.core_setting_dir,
@@ -1130,7 +1272,7 @@ def main():
                         # path_asm_test is an assembly file
                         elif os.path.isfile(path_asm_test):
                             run_assembly(path_asm_test, args.iss_yaml, args.isa,
-                                         args.mabi, gcc_opts,
+                                         args.priv, args.mabi, gcc_opts,
                                          args.iss, output_dir,
                                          args.core_setting_dir, args.debug)
                         else:
@@ -1149,13 +1291,13 @@ def main():
                         # path_c_test is a directory
                         if os.path.isdir(path_c_test):
                             run_c_from_dir(path_c_test, args.iss_yaml, args.isa,
-                                           args.mabi,
+                                           args.priv, args.mabi,
                                            gcc_opts, args.iss, output_dir,
                                            args.core_setting_dir, args.debug)
                         # path_c_test is a C file
                         elif os.path.isfile(path_c_test):
                             run_c(path_c_test, args.iss_yaml, args.isa,
-                                  args.mabi, gcc_opts,
+                                  args.priv, args.mabi, gcc_opts,
                                   args.iss, output_dir, args.core_setting_dir,
                                   args.debug)
                         else:
@@ -1177,7 +1319,7 @@ def main():
                 iss_sim(matched_list, output_dir, args.iss, args.iss_yaml,
                         args.iss_opts,
                         args.isa, args.priv, args.core_setting_dir, args.iss_timeout,
-                        args.debug)
+                        args.target == "nanhu_v5_1", args.debug)
 
             # Compare ISS simulation result
             if args.steps == "all" or re.match(".*iss_cmp.*", args.steps):

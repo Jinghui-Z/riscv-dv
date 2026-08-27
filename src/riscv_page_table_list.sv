@@ -161,6 +161,41 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
                         i, j, page_table[i].pte[j].convert2string()), UVM_HIGH)
       end
     end
+    create_signature_mapping();
+  endfunction
+
+  // Signature handshakes run in both M-mode and the configured lower privilege
+  // mode. Keep the signature address identity-mapped so the same address is
+  // valid with translation enabled and disabled, and exclude this observation
+  // channel from random page-table exception and PBMT injection.
+  virtual function void create_signature_mapping();
+    int table_id = 0;
+    int pte_index;
+    int page_shift;
+    bit [XLEN-1:0] signature_page_base;
+
+    if (!cfg.require_signature_addr) return;
+    for (int level = PageLevel - 1; level >= 0; level--) begin
+      pte_index = (cfg.signature_addr >>
+                   (12 + level * riscv_page_table_entry#(MODE)::VPN_WIDTH)) &
+                  (PteCnt - 1);
+      if ((level > 0) && (pte_index < LinkPtePerTable)) begin
+        $cast(page_table[table_id].pte[pte_index], valid_link_pte.clone());
+        table_id = get_child_table_id(table_id, pte_index);
+      end else begin
+        $cast(page_table[table_id].pte[pte_index], valid_data_leaf_pte.clone());
+        page_shift = 12 + level * riscv_page_table_entry#(MODE)::VPN_WIDTH;
+        signature_page_base = (cfg.signature_addr >> page_shift) << page_shift;
+        page_table[table_id].pte[pte_index].set_ppn(signature_page_base, 0, level);
+        page_table[table_id].pte[pte_index].pbmt =
+            riscv_page_table_entry#(MODE)::PTE_PBMT_PMA;
+        page_table[table_id].pte[pte_index].pack_entry();
+        `uvm_info(`gfn, $sformatf("Identity-mapped signature address 0x%0x at PT_%0d_PTE_%0d",
+                                  cfg.signature_addr, table_id, pte_index), UVM_LOW)
+        return;
+      end
+    end
+    `uvm_fatal(`gfn, $sformatf("Failed to map signature address 0x%0x", cfg.signature_addr))
   endfunction
 
   // PBMT is a property of each leaf mapping, not of a page-table template.
@@ -389,7 +424,7 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
                     XLEN - MAX_USED_VADDR_BITS));
     instr.push_back($sformatf("csrr x%0d, 0x%0x # MTVAL", fault_vaddr_reg, MTVAL));
     // - Check if the fault virtual address is in the kernel space
-    instr.push_back($sformatf("bgeu x%0d, x%0d, fix_pte_done", tmp_reg, fault_vaddr_reg));
+    instr.push_back($sformatf("bgtu x%0d, x%0d, fix_pte_done", tmp_reg, fault_vaddr_reg));
     // - Set the PTE.u bit to 0 for kernel space PTE
     instr.push_back($sformatf("li x%0d, 0x%0x", tmp_reg, 'h10));
     instr.push_back($sformatf("not x%0d, x%0d", tmp_reg, tmp_reg));
@@ -419,9 +454,9 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
     instr.push_back($sformatf("csrr x%0d, 0x%0x", tmp_reg, MSTATUS));
     instr.push_back($sformatf("and x%0d, x%0d, x%0d", tmp_reg, tmp_reg, mask_reg));
     instr.push_back($sformatf("beqz x%0d, j_smode", tmp_reg));
-    instr.push_back("jal ra, smode_lsu_program");
+    instr.push_back($sformatf("jal x%0d, smode_lsu_program", cfg.ra));
     instr.push_back("j fix_pte_ret");
-    instr.push_back("j_smode: jal ra, smode_program");
+    instr.push_back($sformatf("j_smode: jal x%0d, smode_program", cfg.ra));
     instr.push_back("fix_pte_ret:");
     // Recover the user mode GPR from kernal stack
     pop_gpr_from_kernel_stack(MSTATUS, MSCRATCH, cfg.mstatus_mprv, cfg.sp, cfg.tp, instr);
@@ -507,12 +542,14 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
                          cfg.gpr[0], cfg.gpr[0], XLEN - MAX_USED_VADDR_BITS),
                $sformatf("srli x%0d, x%0d, %0d",
                          cfg.gpr[0], cfg.gpr[0], XLEN - MAX_USED_VADDR_BITS + 12),
-               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0], $clog2(XLEN)),
+               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0],
+                         $clog2(XLEN/8)),
                $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[1], cfg.gpr[1],
                          XLEN - MAX_USED_VADDR_BITS),
                $sformatf("srli x%0d, x%0d, %0d", cfg.gpr[1], cfg.gpr[1],
                          XLEN - MAX_USED_VADDR_BITS + 12),
-               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[1], cfg.gpr[1], $clog2(XLEN)),
+               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[1], cfg.gpr[1],
+                         $clog2(XLEN/8)),
                // Starting from the first 4KB leaf page table
                $sformatf("la x%0d, page_table_%0d", cfg.gpr[2], get_1st_4k_table_id()),
                $sformatf("add x%0d, x%0d, x%0d", cfg.gpr[0], cfg.gpr[2], cfg.gpr[0]),
@@ -536,7 +573,8 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
                          XLEN - MAX_USED_VADDR_BITS),
                $sformatf("srli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0],
                          XLEN - MAX_USED_VADDR_BITS + 12),
-               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0], $clog2(XLEN)),
+               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0],
+                         $clog2(XLEN/8)),
                // Starting from the first 4KB leaf page table
                $sformatf("la x%0d, page_table_%0d", cfg.gpr[2], get_1st_4k_table_id()),
                $sformatf("add x%0d, x%0d, x%0d", cfg.gpr[0], cfg.gpr[2], cfg.gpr[0]),
@@ -553,7 +591,34 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
                // Move to the next PTE
                $sformatf("addi x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0], XLEN/8),
                // If not the end of the kernel space, process the next PTE
-               $sformatf("ble x%0d, x%0d, 2b", cfg.gpr[0], cfg.gpr[1])};
+               $sformatf("ble x%0d, x%0d, 2b", cfg.gpr[0], cfg.gpr[1]),
+               // The trap handler saves GPRs before it can repair a faulting
+               // PTE. Kernel stack pages therefore must already be S-mode
+               // accessible or a stack store recursively faults forever.
+               $sformatf("la x%0d, kernel_stack_start", cfg.gpr[0]),
+               $sformatf("la x%0d, kernel_stack_end", cfg.gpr[1]),
+               $sformatf("slli x%0d, x%0d, %0d",
+                         cfg.gpr[0], cfg.gpr[0], XLEN - MAX_USED_VADDR_BITS),
+               $sformatf("srli x%0d, x%0d, %0d",
+                         cfg.gpr[0], cfg.gpr[0], XLEN - MAX_USED_VADDR_BITS + 12),
+               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0],
+                         $clog2(XLEN/8)),
+               $sformatf("slli x%0d, x%0d, %0d",
+                         cfg.gpr[1], cfg.gpr[1], XLEN - MAX_USED_VADDR_BITS),
+               $sformatf("srli x%0d, x%0d, %0d",
+                         cfg.gpr[1], cfg.gpr[1], XLEN - MAX_USED_VADDR_BITS + 12),
+               $sformatf("slli x%0d, x%0d, %0d", cfg.gpr[1], cfg.gpr[1],
+                         $clog2(XLEN/8)),
+               $sformatf("la x%0d, page_table_%0d", cfg.gpr[2], get_1st_4k_table_id()),
+               $sformatf("add x%0d, x%0d, x%0d", cfg.gpr[0], cfg.gpr[2], cfg.gpr[0]),
+               $sformatf("add x%0d, x%0d, x%0d", cfg.gpr[1], cfg.gpr[2], cfg.gpr[1]),
+               $sformatf("li x%0d, 0x%0x", cfg.gpr[2], ubit_mask),
+               "3:",
+               $sformatf("l%0s x%0d, 0(x%0d)", load_store_unit, cfg.gpr[3], cfg.gpr[0]),
+               $sformatf("and x%0d, x%0d, x%0d", cfg.gpr[3], cfg.gpr[3], cfg.gpr[2]),
+               $sformatf("s%0s x%0d, 0(x%0d)", load_store_unit, cfg.gpr[3], cfg.gpr[0]),
+               $sformatf("addi x%0d, x%0d, %0d", cfg.gpr[0], cfg.gpr[0], XLEN/8),
+               $sformatf("ble x%0d, x%0d, 3b", cfg.gpr[0], cfg.gpr[1])};
     end
     instr = {instr, "sfence.vma"};
   endfunction

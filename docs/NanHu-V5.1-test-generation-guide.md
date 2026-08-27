@@ -15,14 +15,16 @@
 `lp64d`、M/S/U 特权级和 Sv39。它不支持 `--simulator pyflow`。本文使用
 VCS；其他 SystemVerilog/UVM 模拟器需要在实际环境中另行验证。
 
-推荐将生成和编译明确限制为：
+正常生成流程应同时执行 GNU 编译和 Spike 预检查：
 
 ```bash
---steps gen,gcc_compile
+--steps gen,gcc_compile,iss_sim
+--iss spike
 ```
 
-这两个阶段分别完成 UVM 随机程序生成和 GNU 汇编/链接，不会运行 NanHu
-RTL。testlist 中的 `rtl_test: core_base_test` 只是下游 testbench 的集成元数据，
+三个阶段分别完成 UVM 随机程序生成、GNU 汇编/链接和 Spike 执行。该流程不会
+运行 NanHu RTL；Spike 通过是 ELF 的参考模型预检查，不等同于 NanHu RTL
+通过。testlist 中的 `rtl_test: core_base_test` 只是下游 testbench 的集成元数据，
 `run.py` 当前不会消费该字段。
 
 ## 2. 环境准备
@@ -31,11 +33,24 @@ RTL。testlist 中的 `rtl_test: core_base_test` 只是下游 testbench 的集�
 
 ```bash
 cd /nfs/home/zhongjinghui/tool/ISG/riscv-dv
-pip3 install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 python3 run.py --help
 command -v vcs
 ```
+
+必须通过 `python3 -m pip` 安装依赖，确保 pip 与执行 `run.py` 的解释器一致。
+若日志提示 `module 'yaml' has no attribute 'safe_load'`，表示当前解释器没有正确
+导入 PyYAML；仓库自身的 `yaml/` 配置目录被识别成了同名 Python namespace。
+可用以下命令检查并修复：
+
+```bash
+python3 -c "import sys, yaml; print(sys.executable); print(yaml.__file__)"
+python3 -m pip install --upgrade PyYAML
+```
+
+正常的 `yaml.__file__` 应指向 Python 安装目录中的 `yaml/__init__.py`（例如
+`site-packages` 或 `dist-packages`），而不是 `None` 或本仓库的 `yaml/` 目录。
 
 VCS 环境需要支持 SystemVerilog 和 UVM 1.2，并配置好许可证。当前机器已验证的
 VCS 路径为 `/nfs/tools/synopsys/vcs/U-2023.03/bin/vcs`。
@@ -55,25 +70,44 @@ export RISCV_OBJCOPY=/nfs/share/opt/riscv/bin/riscv64-unknown-linux-gnu-objcopy
 使用其他工具链时，应确保其支持 testlist 中的 Vector 1.0、bitmanip、crypto、
 Svinval 和 Svpbmt 等 `-march` 扩展字符串。
 
+### 2.3 Spike
+
+`iss_sim` 阶段使用以下 Spike。`SPIKE_PATH` 必须指向包含 `spike` 的目录，而
+不是可执行文件本身；建议将 export 写入 `~/.bashrc`：
+
+```bash
+export SPIKE_PATH=/nfs/home/zhongjinghui/tool/simulator/riscv-isa-sim/install/bin
+
+"${SPIKE_PATH}/spike" --help | head
+```
+
+该版本通过 ISA 扩展 `Zicclsm` 控制非对齐访存支持，不接受旧的
+`--misaligned` 选项。runner 在展开 Spike 命令时会为 ISA 补充 `zicclsm`
+（自定义 target 已包含时不会重复），因此不要在本地命令模板中恢复
+`--misaligned`。此 Spike 不支持 `--version`，环境检查应使用上面的
+`spike --help`。
+
 ## 3. 快速开始
 
-### 3.1 生成并编译单个用例
+### 3.1 生成、编译并预检查单个用例
 
-下面的命令生成一个 Vector 1.0/Zvbb 用例，并产生 `.S`、`.o` 和 `.bin`：
+下面的命令生成一个 Vector 1.0/Zvbb 用例，产生 `.S`、`.o` 和 `.bin`，并用
+Spike 执行 ELF：
 
 ```bash
 python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_vector_zvbb_smoke \
   --simulator vcs \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed 9101 \
   --output out/nanhu_vector
 ```
 
 ### 3.2 只生成汇编
 
-只需要 `.S` 文件时，可跳过 GNU 编译：
+定位生成阶段问题时，可以暂时只生成 `.S`：
 
 ```bash
 python3 run.py \
@@ -81,6 +115,18 @@ python3 run.py \
   --test nanhu_v5_1_base_smoke \
   --steps gen \
   --seed 9102 \
+  --output out/nanhu_base_asm
+```
+
+这是单阶段诊断，不是完整验收。同一 revision、target、参数和输出目录下，最终
+必须补跑 GNU 编译与 Spike：
+
+```bash
+python3 run.py \
+  --target nanhu_v5_1 \
+  --test nanhu_v5_1_base_smoke \
+  --steps gcc_compile,iss_sim \
+  --iss spike \
   --output out/nanhu_base_asm
 ```
 
@@ -94,13 +140,15 @@ python3 run.py \
   --target nanhu_v5_1 \
   --test all \
   --simulator vcs \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --start_seed 9200 \
   --output out/nanhu_all
 ```
 
 每项默认生成一次，因此成功时 `out/nanhu_all/asm_test/` 下应有 14 个
-`.S`、14 个 `.o` 和 14 个 `.bin`。
+`.S`、14 个 `.o` 和 14 个 `.bin`，`out/nanhu_all/spike_sim/` 下还应有
+14 个对应的 Spike 日志。
 
 ### 3.4 一次选择多个用例
 
@@ -111,7 +159,8 @@ python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_scalar_extensions_smoke,nanhu_v5_1_scalar_crypto_smoke \
   --iterations 5 \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --start_seed 9400 \
   --output out/nanhu_scalar_regression
 ```
@@ -129,7 +178,8 @@ python3 run.py \
 python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_vector_smode_smoke \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed 9200 \
   --output out/nanhu_replay_one
 ```
@@ -140,7 +190,8 @@ python3 run.py \
 python3 run.py \
   --target nanhu_v5_1 \
   --test all \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed_yaml out/nanhu_all/seed.yaml \
   --output out/nanhu_replay_all
 ```
@@ -163,7 +214,8 @@ python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_svinval_svpbmt_smoke \
   --cmp_opts="+define+NANHU_V5_1_SV48" \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed 5201 \
   --output out/nanhu_sv48
 ```
@@ -177,7 +229,8 @@ python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_base_smoke \
   --cmp_opts="+define+NANHU_V5_1_BARE" \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed 5202 \
   --output out/nanhu_bare
 ```
@@ -189,7 +242,7 @@ Bare 结果只证明模式选择和生成路径可用，不能作为 Svpbmt、Sv
 
 | 用例 | 默认 | 主要用途 |
 | --- | --- | --- |
-| `nanhu_v5_1_base_smoke` | 开 | RV64 IMAFDC、特权、浮点、非对齐访存；唯一未设置 `no_iss` 的项目。 |
+| `nanhu_v5_1_base_smoke` | 开 | RV64 IMAFDC、特权、浮点和非对齐访存。 |
 | `nanhu_v5_1_scalar_extensions_smoke` | 开 | Zba/Zbb/Zbc/Zbkc/Zbs、Zcb、Zicond、Zimop/Zcmop 和 Zicbo*。 |
 | `nanhu_v5_1_scalar_crypto_smoke` | 开 | Zbkb/Zbkc/Zbkx、AES/SHA、SM3/SM4 及 Zkn/Zks 组合。 |
 | `nanhu_v5_1_zbkc_subset_smoke` | 开 | 严格 Zbkc 子集；通过不启用 Zbc 捕获错误的 `clmulr` 生成。 |
@@ -203,16 +256,14 @@ Bare 结果只证明模式选择和生成路径可用，不能作为 Svpbmt、Sv
 | `nanhu_v5_1_vector_zvbb_smoke` | 开 | M-mode Vector 1.0、Zvbb、FP64、widening/narrowing 和向量访存。 |
 | `nanhu_v5_1_vector_smode_smoke` | 开 | S-mode Vector 1.0/Zvbb 和 `sstatus.VS` 初始化。 |
 | `nanhu_v5_1_debug_rom_smoke` | 开 | Debug ROM、DCSR/DPC/scratch、debug ebreak 和 single-step 生成。 |
-| `nanhu_v5_1_scalar_encoding_unit` | 关 | UVM 内部 scalar/crypto 编码与扩展分组断言；不生成汇编。 |
-| `nanhu_v5_1_platform_interrupt_example` | 关 | ACLINT 初始化和 PLIC claim/complete 的地址集成模板。 |
+| `nanhu_v5_1_scalar_encoding_unit` | 关 | UVM 内部 scalar/crypto 编码与扩展分组断言；不生成汇编，是唯一保留 `no_iss` 的项目。 |
+| `nanhu_v5_1_platform_interrupt_example` | 关 | ACLINT 初始化和 PLIC claim/complete 的地址集成模板；启用后也执行 Spike 预检查。 |
 
-除 `nanhu_v5_1_base_smoke` 外，其余 15 项均设置了 `no_iss: 1`。因此即使
-使用默认的 `--steps all`，这些项目也不会进入 ISS；NanHu 日常生成回归应显式
-使用 `--steps gen,gcc_compile`。
-
-不要对 NanHu 全量 testlist 使用 `--iss <iss1>,<iss2> --steps all`：当前
-`iss_sim` 会跳过 `no_iss` 项，但双 ISS 的 `iss_cmp` 仍会尝试读取这些项目的
-日志。确需 ISS 比对时，应使用只包含 ISS 已支持项目的独立 testlist。
+只有不生成 `.S/.o/.bin` 的 `nanhu_v5_1_scalar_encoding_unit` 保留
+`no_iss: 1`。其他 NanHu ELF 用例（包括默认关闭的平台中断模板）都必须执行
+Spike 预检查。正常生成应显式使用
+`--steps gen,gcc_compile,iss_sim --iss spike`；不要用 `--steps all` 隐式引入
+未配置的双 ISS trace compare。
 
 ## 7. 运行两个默认关闭的项目
 
@@ -274,13 +325,20 @@ python3 run.py \
   --target nanhu_v5_1 \
   --testlist out/nanhu_config/testlist.yaml \
   --test nanhu_v5_1_platform_interrupt_example \
-  --steps gen,gcc_compile \
+  --steps gen,gcc_compile,iss_sim \
+  --iss spike \
   --seed 9301 \
   --output out/nanhu_platform_interrupt
 ```
 
 仓库中的 `0x02000000`、`0x02004000`、`0x0c200004` 和 `0x0c201004` 只是传统
 占位地址，不能直接作为 NanHu 平台验证结果。
+
+Spike 不一定建模实际 NanHu/SoC 的 MMIO responder、PLIC 路由和设备副作用，
+因此平台模板可能在 `iss_sim` 失败或停滞。该结果应带着 Spike 日志、地址配置和
+完整命令作为集成阻断处理；若只是定位平台语义，可以明确标记为诊断例外并暂时
+分阶段执行 `gen,gcc_compile`，但不能通过新增 `no_iss` 或省略 `iss_sim` 将其
+静默计为正常生成通过。
 
 ## 8. 输出文件与结果检查
 
@@ -294,6 +352,7 @@ python3 run.py \
 | `asm_test/<test>_<idx>.S` | 生成的汇编程序。 |
 | `asm_test/<test>_<idx>.o` | 链接后的 ELF，虽然后缀为 `.o`。 |
 | `asm_test/<test>_<idx>.bin` | 供下游 memory loader 使用的裸二进制；文件本身不携带加载地址。 |
+| `spike_sim/<test>_<idx>.log` | Spike commit trace 和预检查日志；每个非 `no_iss` ELF 对应一份。 |
 | `vcs_simv`、`vcs_simv.csrc/` | VCS 可执行文件和编译目录。 |
 
 默认 [`scripts/link.ld`](../scripts/link.ld) 将 `.text` 放在 `0x80000000`，入口
@@ -307,10 +366,23 @@ loader，不能只把无地址信息的 `.bin` 放入任意 RAM。
 rg -n "TEST PASSED|UVM_ERROR|UVM_FATAL" out/nanhu_all/sim_*.log
 find out/nanhu_all/asm_test -maxdepth 1 -name '*.bin' -print
 find out/nanhu_all/asm_test -maxdepth 1 -name '*.bin' | wc -l
+find out/nanhu_all/spike_sim -maxdepth 1 -name '*.log' -size +0c -print
+find out/nanhu_all/spike_sim -maxdepth 1 -name '*.log' -size +0c | wc -l
 ```
 
 成功的生成日志应包含 `TEST PASSED`，UVM summary 中 `UVM_ERROR` 和
-`UVM_FATAL` 均应为 0。默认回归的 `.bin` 数量应为 14。
+`UVM_FATAL` 均应为 0。默认回归的 `.bin` 和非空 Spike 日志数量都应为 14，
+且每个 Spike 子进程应自然结束并返回 0；仅有旧日志或非空日志不能证明
+`iss_sim` 通过。生成器固定以 `.word 0x0005006b` 作为结束 marker，因此普通
+NanHu 日志可以没有 illegal trap；若出现，则只允许一次且紧随其后的 `tval`
+必须是 `0x0005006b`。其它 illegal instruction、未建模 MMIO 或超时应按 ISS
+失败处理。
+
+`nanhu_v5_1_csr_smoke` 和 `nanhu_v5_1_invalid_csr_smode_smoke` 是明确的
+CSR trap 例外：testlist 同时设置 `allow_iss_illegal_instr: 1` 和
+`iss_allowed_illegal_csrs`。runner 仍逐条检查 Spike log，并从 `tval` 解码
+CSR 指令；只有列表中的地址可以额外 trap，Vector/普通 illegal、未列出的 CSR、
+缺失 `tval` 或重复结束 marker 都会失败。
 
 `run.py` 当前会保留已有输出目录内容，`--noclean` 的默认值也是 true。为避免
 旧日志或旧二进制混入结果，普通回归应使用新的输出目录；只有明确复用已编译
@@ -318,7 +390,8 @@ find out/nanhu_all/asm_test -maxdepth 1 -name '*.bin' | wc -l
 
 ## 9. 生成器编译复用
 
-大量单项回归可以先只编译一次生成器，再在同一输出目录中只运行仿真：
+大量单项回归可以先只编译一次生成器，再在同一输出目录中只运行仿真。下面两步
+属于生成器缓存和单阶段调试，不是最终验收：
 
 ```bash
 python3 run.py \
@@ -336,14 +409,15 @@ python3 run.py \
   --output out/nanhu_cached
 ```
 
-第二条命令只生成 `.S`。如需 ELF 和 binary，再运行：
+第二条命令只生成 `.S`。最终必须在同一配置的输出目录中生成 ELF/binary 并
+执行 Spike：
 
 ```bash
 python3 run.py \
   --target nanhu_v5_1 \
   --test nanhu_v5_1_base_smoke \
-  --steps gcc_compile \
-  --seed 9500 \
+  --steps gcc_compile,iss_sim \
+  --iss spike \
   --output out/nanhu_cached
 ```
 
@@ -371,8 +445,10 @@ Sv39、Sv48、Bare 或其他 `--cmp_opts` 不同的配置不能共用同一个�
    NanHu LSQ 死锁风险；当前 smoke 不能作为 segment load/store 覆盖证据。
 6. Debug smoke 只生成 Debug ROM 和相关 CSR 序列，外部 debug transport、
    halt/resume 和执行语义仍需 testbench 驱动及检查。
-7. 除 base smoke 外的项目没有 ISS 比对；scalar/crypto、特权、MMU 和 Vector
-   扩展的执行正确性必须由 NanHu RTL 环境、参考模型或 checker 验证。
+7. 所有生成 ELF 的项目都会先用 Spike 执行，但这只覆盖 Spike 已实现的架构
+   语义；平台设备行为以及 NanHu scalar/crypto、特权、MMU 和 Vector 的 RTL
+   执行正确性仍需真实 RTL 环境和 checker 验证。
 
 因此，日志中的 `TEST PASSED` 仅表示 UVM 生成阶段通过；`.bin` 生成表示 GNU
-汇编、链接和 objcopy 通过，二者都不能单独作为 NanHu 架构合规结论。
+汇编、链接和 objcopy 通过；Spike 返回 0 表示参考模型预检查通过。这三项都不能
+单独作为 NanHu 架构合规结论。

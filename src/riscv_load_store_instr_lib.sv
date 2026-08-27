@@ -280,6 +280,52 @@ class riscv_load_store_rand_instr_stream extends riscv_load_store_base_instr_str
 
 endclass
 
+// Generate cache-block operations against an address in a legal data page.
+// These instructions cannot use an arbitrary GPR value because access faults
+// may otherwise restart forever in the common trap handler.
+class riscv_cbo_instr_stream extends riscv_mem_access_stream;
+
+  rand int unsigned data_page_id;
+  rand riscv_reg_t   rs1_reg;
+
+  constraint cbo_data_page_c {
+    data_page_id < max_data_page_id;
+  }
+
+  constraint cbo_rs1_c {
+    !(rs1_reg inside {cfg.reserved_regs, ZERO});
+  }
+
+  `uvm_object_utils(riscv_cbo_instr_stream)
+  `uvm_object_new
+
+  function void post_randomize();
+    riscv_instr instr;
+    riscv_instr_name_t cbo_instr[$];
+
+    if (cfg.enable_zicbom_extension) begin
+      cbo_instr = {CBO_INVAL, CBO_CLEAN, CBO_FLUSH};
+    end
+    if (cfg.enable_zicboz_extension) begin
+      cbo_instr.push_back(CBO_ZERO);
+    end
+    if (cbo_instr.size() == 0) begin
+      `uvm_fatal(`gfn, "riscv_cbo_instr_stream requires Zicbom or Zicboz")
+    end
+
+    foreach (cbo_instr[i]) begin
+      instr = riscv_instr::get_instr(cbo_instr[i]);
+      instr.m_cfg = cfg;
+      instr.rs1 = rs1_reg;
+      instr.process_load_store = 1'b0;
+      instr_list.push_back(instr);
+    end
+    add_rs1_init_la_instr(rs1_reg, data_page_id);
+    super.post_randomize();
+  endfunction
+
+endclass
+
 // Use a small set of GPR to create various WAW, RAW, WAR hazard scenario
 class riscv_hazard_instr_stream extends riscv_load_store_base_instr_stream;
 
@@ -577,8 +623,9 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
   }
 
   constraint vec_rs_c {
-    !(rs1_reg inside {cfg.reserved_regs, reserved_rd, ZERO});
-    !(rs2_reg inside {cfg.reserved_regs, reserved_rd, ZERO});
+    // cfg.gpr[0] is scratch for the indexed-vector initialization sequence.
+    !(rs1_reg inside {cfg.reserved_regs, reserved_rd, cfg.gpr, ZERO});
+    !(rs2_reg inside {cfg.reserved_regs, reserved_rd, cfg.gpr, ZERO});
     rs1_reg != rs2_reg;
   }
 
@@ -604,12 +651,98 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
       instr_list.push_front(get_init_gpr_instr(rs2_reg, stride_byte_offset));
     end else if (address_mode == INDEXED) begin
       // TODO: Support different index address for each element
-      add_init_vector_gpr_instr(vs2_reg, index_addr);
+      add_init_index_vector_instr();
     end
     super.post_randomize();
-    // The index reservation is only needed while this stream's mixed
-    // instructions are created. Do not leak it into the main random stream.
-    cfg.vector_cfg.reserved_vregs.delete();
+  endfunction
+
+  virtual function bit [2:0] lmul_encoding(bit fractional, int magnitude);
+    if (fractional) begin
+      case (magnitude)
+        2: return 3'b111;
+        4: return 3'b110;
+        8: return 3'b101;
+        default: `uvm_fatal(`gfn, $sformatf("Unsupported fractional LMUL 1/%0d", magnitude))
+      endcase
+    end else begin
+      case (magnitude)
+        1: return 3'b000;
+        2: return 3'b001;
+        4: return 3'b010;
+        8: return 3'b011;
+        default: `uvm_fatal(`gfn, $sformatf("Unsupported LMUL %0d", magnitude))
+      endcase
+    end
+  endfunction
+
+  virtual function riscv_vector_set_instr get_vsetvli_instr(
+      int sew, bit fractional, int lmul, riscv_reg_t avl_reg);
+    riscv_vector_set_instr instr;
+    bit [2:0] vsew_encoding;
+    $cast(instr, riscv_instr::get_instr(VSETVLI));
+    instr.m_cfg = cfg;
+    instr.rd = ZERO;
+    instr.rs1 = avl_reg;
+    vsew_encoding = $clog2(sew / 8);
+    instr.vtype_imm = {3'b000, cfg.vector_cfg.vtype.vma,
+                      cfg.vector_cfg.vtype.vta, vsew_encoding,
+                      lmul_encoding(fractional, lmul)};
+    return instr;
+  endfunction
+
+  // VMV.V.X writes elements at the active SEW. Temporarily select the index
+  // EEW and its architectural EMUL so the initialized register layout matches
+  // indexed load/store interpretation, then restore the program's vtype.
+  virtual function void add_init_index_vector_instr();
+    riscv_instr init_instr[$];
+    riscv_vector_instr vmv_instr;
+    int load_store_idx = -1;
+    int emul_num;
+    int emul_den;
+    bit index_fractional;
+    int index_lmul;
+
+    emul_num = (cfg.vector_cfg.vtype.fractional_lmul ? 1 :
+                cfg.vector_cfg.vtype.vlmul) * eew;
+    emul_den = (cfg.vector_cfg.vtype.fractional_lmul ?
+                cfg.vector_cfg.vtype.vlmul : 1) * cfg.vector_cfg.vtype.vsew;
+    while ((emul_num > 1) && (emul_den > 1) &&
+           ((emul_num % 2) == 0) && ((emul_den % 2) == 0)) begin
+      emul_num /= 2;
+      emul_den /= 2;
+    end
+    index_fractional = emul_num < emul_den;
+    index_lmul = index_fractional ? (emul_den / emul_num) :
+                                    (emul_num / emul_den);
+
+    init_instr.push_back(get_init_gpr_instr(cfg.gpr[0], cfg.vector_cfg.vl));
+    init_instr.push_back(get_vsetvli_instr(eew, index_fractional,
+                                           index_lmul, cfg.gpr[0]));
+    init_instr.push_back(get_init_gpr_instr(cfg.gpr[0], index_addr));
+    $cast(vmv_instr, riscv_instr::get_instr(VMV));
+    vmv_instr.m_cfg = cfg;
+    vmv_instr.va_variant = VX;
+    vmv_instr.vd = vs2_reg;
+    vmv_instr.rs1 = cfg.gpr[0];
+    vmv_instr.vm = 1'b1;
+    init_instr.push_back(vmv_instr);
+    init_instr.push_back(get_init_gpr_instr(cfg.gpr[0], cfg.vector_cfg.vl));
+    init_instr.push_back(get_vsetvli_instr(cfg.vector_cfg.vtype.vsew,
+                                           cfg.vector_cfg.vtype.fractional_lmul,
+                                           cfg.vector_cfg.vtype.vlmul,
+                                           cfg.gpr[0]));
+    foreach (instr_list[i]) begin
+      if (instr_list[i] == load_store_instr) begin
+        load_store_idx = i;
+        break;
+      end
+    end
+    if (load_store_idx < 0) begin
+      `uvm_fatal(`gfn, "Cannot locate indexed load/store instruction in stream")
+    end
+    foreach (init_instr[i]) begin
+      instr_list.insert(load_store_idx + i, init_instr[i]);
+    end
   endfunction
 
   virtual function void randomize_addr();
@@ -751,9 +884,6 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
   endfunction
 
   virtual function void randomize_vec_load_store_instr();
-    // reserved_vregs protects the index register only within one directed
-    // stream. Do not carry that reservation into the next stream instance.
-    cfg.vector_cfg.reserved_vregs.delete();
     $cast(load_store_instr, riscv_instr::get_load_store_instr(allowed_instr));
     load_store_instr.m_cfg = cfg;
     load_store_instr.has_rs1 = 0;
@@ -773,7 +903,6 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
     load_store_instr.rs2 = rs2_reg;
     if (address_mode == INDEXED) begin
       vs2_reg = load_store_instr.vs2;
-      cfg.vector_cfg.reserved_vregs = {vs2_reg};
       `uvm_info(`gfn, $sformatf("vs2_reg = v%0d", vs2_reg), UVM_LOW)
     end else begin
       load_store_instr.vs2 = vs2_reg;

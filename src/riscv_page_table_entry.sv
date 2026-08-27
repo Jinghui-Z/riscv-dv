@@ -34,7 +34,7 @@ class riscv_page_table_entry#(satp_mode_t MODE = SV39) extends uvm_object;
   parameter int PPN0_WIDTH  = (MODE == SV32) ? 10 : 9;
   parameter int PPN1_WIDTH  = (MODE == SV32) ? 12 : 9;
   parameter int PPN2_WIDTH  = (MODE == SV39) ? 26 : ((MODE == SV48) ? 9 : 1);
-  parameter int PPN3_WIDTH  = (MODE == SV48) ? 9  : 1;
+  parameter int PPN3_WIDTH  = (MODE == SV48) ? 17 : 1;
   parameter int RSVD_WIDTH  = (MODE == SV32) ? 1  : 10;
   parameter int VPN_WIDTH   = (MODE == SV32) ? 10 : 9;
   // Spare bits in virtual address = XLEN - used virtual address bits

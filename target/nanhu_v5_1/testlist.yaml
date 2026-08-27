@@ -33,7 +33,6 @@
     Ratified scalar bit-manipulation, compressed, conditional, MOP and
     cache-block operation extensions supported by NanHu V5.1.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=4000
@@ -51,6 +50,7 @@
     +enable_zicbom_extension=1
     +enable_zicbop_extension=1
     +enable_zicboz_extension=1
+    +directed_instr_0=riscv_cbo_instr_stream,1
   gcc_opts: >
     -march=rv64imafdc_zba_zbb_zbc_zbs_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zicsr_zifencei
     -mabi=lp64d
@@ -61,7 +61,6 @@
     NIST and ShangMi scalar cryptography, including the common Zbkb, Zbkc and
     Zbkx instruction subsets.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=4000
@@ -88,7 +87,6 @@
     Strict Zbkc subset regression. Compiling with Zbkc but without Zbc makes
     any accidental CLMULR generation fail in the assembler stage.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=2500
@@ -119,7 +117,6 @@
     The signature address below is generator-only scratch space; a real SoC/TB
     run must override it with a writable address from the integration map.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=2500
@@ -142,7 +139,6 @@
     Deterministic Svade dirty-bit page-fault generation with all unrelated
     page-table exception injection disabled.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1600
@@ -163,7 +159,6 @@
     U-mode exception delegation into the S-mode trap handler with STVAL
     reported through the configured signature channel.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1000
@@ -171,6 +166,7 @@
     +boot_mode=u
     +no_delegation=0
     +force_m_delegation=1
+    +set_mstatus_sum=1
     +enable_tval_check=1
     +require_signature_addr=1
     +signature_addr=8fffffd0
@@ -186,9 +182,20 @@
   description: >
     Random accesses across the implemented base, state-enable, timer,
     counter-overflow, trigger, floating-point and vector CSR whitelist. Debug
-    CSRs are covered separately by the Debug ROM smoke test.
+    CSRs are covered separately by the Debug ROM smoke test. Spike does not
+    model the NanHu trigger/context CSRs TCONTROL (0x7a5), MCONTEXT (0x7a8),
+    MSCONTEXT (0x7aa) and SCONTEXT (0x5a8), so an illegal trap is expected for
+    those accesses; Spike still executes the ELF.
   iterations: 1
-  no_iss: 1
+  allow_iss_illegal_instr: 1
+  iss_allowed_illegal_csrs:
+    - 0x7a5
+    - 0x7a8
+    - 0x7aa
+    - 0x5a8
+  iss_illegal_reason: >
+    The selected Spike build lacks NanHu TCONTROL/MCONTEXT/MSCONTEXT/SCONTEXT
+    CSR models; allow only those CSR illegal traps, not other instructions.
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=3000
@@ -199,7 +206,7 @@
     +use_vector_1_0=1
     +gen_all_csrs_by_default=1
     +gen_csr_ro_write=0
-    +add_csr_write=MENVCFG,MSTATEEN0,MSTATEEN1,MSTATEEN2,MSTATEEN3,MCOUNTEREN,MCOUNTINHIBIT,MHPMEVENT3,TSELECT,TDATA1,TDATA2,TDATA3,TCONTROL,MCONTEXT,MSCONTEXT,SENVCFG,SSTATEEN0,STIMECMP,SCONTEXT,VSTART,VXSAT,VXRM,VCSR
+    +add_csr_write=MENVCFG,MSTATEEN0,MSTATEEN1,MSTATEEN2,MSTATEEN3,MCOUNTEREN,MCOUNTINHIBIT,MHPMEVENT3,TSELECT,TDATA1,TDATA2,TDATA3,TCONTROL,MCONTEXT,MSCONTEXT,SENVCFG,SSTATEEN0,STIMECMP,SCONTEXT,VXSAT,VXRM,VCSR
   gcc_opts: >
     -march=rv64imafdcv_zicsr_zifencei
     -mabi=lp64d
@@ -208,9 +215,21 @@
 - test: nanhu_v5_1_invalid_csr_smode_smoke
   description: >
     Supervisor-mode invalid-level CSR accesses, including M-mode trigger CSRs
-    whose names do not begin with an M prefix.
+    whose names do not begin with an M prefix. Intentional accesses to trigger
+    CSR addresses TSELECT through TCONTROL (0x7a0-0x7a5) are expected to trap
+    as illegal while Spike still executes the ELF.
   iterations: 1
-  no_iss: 1
+  allow_iss_illegal_instr: 1
+  iss_allowed_illegal_csrs:
+    - 0x7a0
+    - 0x7a1
+    - 0x7a2
+    - 0x7a3
+    - 0x7a4
+    - 0x7a5
+  iss_illegal_reason: >
+    This entry intentionally accesses M-mode trigger CSRs 0x7a0-0x7a5 from
+    S-mode; allow only the expected illegal traps for those CSR instructions.
   gen_test: riscv_invalid_priv_csr_filter_test
   gen_opts: >
     +instr_cnt=1500
@@ -231,7 +250,6 @@
     Generate the Sscofpmf LCOFI delegation and M/S interrupt-enable state.
     Counter event selection remains platform-specific.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1200
@@ -255,7 +273,6 @@
     Open the Smstateen/Ssstateen hierarchy for U-mode floating-point state,
     including both mstateen0.FCSR and sstateen0.FCSR.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1000
@@ -273,7 +290,6 @@
   description: >
     Ratified Vector 1.0 syntax and Zvbb vector bit-manipulation smoke test.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=4000
@@ -300,7 +316,6 @@
   description: >
     Supervisor-mode Vector 1.0 smoke test, including sstatus.VS setup.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1200
@@ -322,7 +337,6 @@
     Debug ROM generation with architectural DCSR, DPC and debug scratch CSR
     accesses executed in Debug Mode.
   iterations: 1
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1000
@@ -346,7 +360,6 @@
   description: >
     ACLINT initialization and PLIC claim/complete integration example.
   iterations: 0
-  no_iss: 1
   gen_test: riscv_instr_base_test
   gen_opts: >
     +instr_cnt=1000

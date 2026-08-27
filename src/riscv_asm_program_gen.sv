@@ -179,13 +179,13 @@ class riscv_asm_program_gen extends uvm_object;
   // Generate kernel program/data/stack sections
   //---------------------------------------------------------------------------------------
   virtual function void gen_kernel_sections(int hart);
+    instr_stream.push_back(".text");
     if (SATP_MODE != BARE) begin
       instr_stream.push_back(".align 12");
     end else begin
       instr_stream.push_back(".align 2");
     end
     instr_stream.push_back(get_label("kernel_instr_start:", hart));
-    instr_stream.push_back(".text");
     // Kernel programs
     if (cfg.virtual_addr_translation_on) begin
       umode_program = riscv_instr_sequence::type_id::create(get_label("umode_program", hart));
@@ -476,6 +476,17 @@ class riscv_asm_program_gen extends uvm_object;
         default : `uvm_fatal(`gfn, $sformatf("%0s is not yet supported",
                                    supported_isa[i].name()))
       endcase
+    end
+    // The ratified B extension is the Zba+Zbb+Zbs combination. Keep the
+    // legacy RV{32,64}B groups separate because they also register draft
+    // bitmanip instructions that must not leak into subset-only targets.
+    if (((RV32ZBA inside {supported_isa}) &&
+         (RV32ZBB inside {supported_isa}) &&
+         (RV32ZBS inside {supported_isa})) ||
+        ((RV64ZBA inside {supported_isa}) &&
+         (RV64ZBB inside {supported_isa}) &&
+         (RV64ZBS inside {supported_isa}))) begin
+      misa[MISA_EXT_B] = 1'b1;
     end
     if (SUPERVISOR_MODE inside {supported_privileged_mode}) begin
       misa[MISA_EXT_S] = 1'b1;
@@ -1000,6 +1011,9 @@ class riscv_asm_program_gen extends uvm_object;
       // Store fault handler
       gen_store_fault_handler(hart);
     end
+    if (SUPERVISOR_MODE inside {riscv_instr_pkg::supported_privileged_mode}) begin
+      gen_smode_ecall_handler(hart);
+    end
     // Ebreak handler
     gen_ebreak_handler(hart);
     // Illegal instruction handler
@@ -1048,7 +1062,9 @@ class riscv_asm_program_gen extends uvm_object;
                                                  privileged_reg_t ie, privileged_reg_t ip);
     bit is_interrupt = 'b1;
     string tvec_name;
+    string umode_ecall_handler_name;
     string instr[$];
+    umode_ecall_handler_name = (mode == "s") ? "smode_ecall_handler" : "ecall_handler";
     if (cfg.mtvec_mode == VECTORED) begin
       gen_interrupt_vector_table(hart, mode, status, cause, ie, ip, scratch, instr);
     end else begin
@@ -1099,8 +1115,8 @@ class riscv_asm_program_gen extends uvm_object;
                        cfg.gpr[0], cfg.gpr[1], hart_prefix(hart)),
              // Check if it's an ECALL exception. Jump to ECALL exception handler
              $sformatf("li x%0d, 0x%0x # ECALL_UMODE", cfg.gpr[1], ECALL_UMODE),
-             $sformatf("beq x%0d, x%0d, %0secall_handler",
-                       cfg.gpr[0], cfg.gpr[1], hart_prefix(hart)),
+             $sformatf("beq x%0d, x%0d, %0s%0s",
+                       cfg.gpr[0], cfg.gpr[1], hart_prefix(hart), umode_ecall_handler_name),
              $sformatf("li x%0d, 0x%0x # ECALL_SMODE", cfg.gpr[1], ECALL_SMODE),
              $sformatf("beq x%0d, x%0d, %0secall_handler",
                        cfg.gpr[0], cfg.gpr[1], hart_prefix(hart)),
@@ -1196,6 +1212,20 @@ class riscv_asm_program_gen extends uvm_object;
     instr.push_back($sformatf("la x%0d, write_tohost", cfg.scratch_reg));
     instr.push_back($sformatf("jalr x0, x%0d, 0", cfg.scratch_reg));
     gen_section(get_label("ecall_handler", hart), instr);
+  endfunction
+
+  // A delegated U-mode ECALL runs in S-mode. Keep its terminal path in the
+  // kernel text mapping and avoid M-mode-only performance CSR accesses.
+  virtual function void gen_smode_ecall_handler(int hart);
+    string instr[$];
+    instr = {
+      $sformatf("li x%0d, 0x%0x", cfg.scratch_reg, SUM_BIT_MASK),
+      $sformatf("csrs 0x%0x, x%0d # sstatus.sum", SSTATUS, cfg.scratch_reg),
+      $sformatf("la x%0d, tohost", cfg.scratch_reg),
+      $sformatf("sw gp, 0(x%0d)", cfg.scratch_reg),
+      $sformatf("j %0ssmode_ecall_handler", hart_prefix(hart))
+    };
+    gen_section(get_label("smode_ecall_handler", hart), instr);
   endfunction
 
   // Ebreak trap handler
@@ -1746,7 +1776,11 @@ class riscv_asm_program_gen extends uvm_object;
     tail_policy = cfg.vector_cfg.vtype.vta ? "ta" : "tu";
     mask_policy = cfg.vector_cfg.vtype.vma ? "ma" : "mu";
     instr_stream.push_back($sformatf("li x%0d, %0d", cfg.gpr[1], cfg.vector_cfg.vl));
-    if ((cfg.vector_cfg.vtype.vlmul > 1) && (cfg.vector_cfg.vtype.fractional_lmul)) begin
+    if (cfg.vector_cfg.vtype.fractional_lmul) begin
+      if (!(cfg.vector_cfg.vtype.vlmul inside {2, 4, 8})) begin
+        `uvm_fatal(`gfn, $sformatf("Invalid fractional LMUL magnitude %0d",
+                                   cfg.vector_cfg.vtype.vlmul))
+      end
       lmul = $sformatf("mf%0d", cfg.vector_cfg.vtype.vlmul);
     end else begin
       lmul = $sformatf("m%0d", cfg.vector_cfg.vtype.vlmul);
