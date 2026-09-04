@@ -221,6 +221,27 @@ class riscv_jal_instr extends riscv_rand_instr_stream;
 
   function void post_randomize();
     int order[];
+    riscv_reg_t runtime_reserved[$];
+    if (preserve_runtime_regs) begin
+      // Keep the live call/stack/PMP registers out of the random filler and
+      // jump destinations when this stream is embedded in an existing
+      // program. Explicitly directed streams retain the historical list.
+      // reserved_rd is a dynamic array (not a queue), so accumulate through
+      // a temporary queue and materialize an array before using it in the
+      // constraints below.  This is accepted by both VCS and simulators that
+      // implement only the IEEE dynamic-array subset.
+      foreach (cfg.reserved_regs[i]) runtime_reserved.push_back(cfg.reserved_regs[i]);
+      foreach (cfg.gpr[i]) runtime_reserved.push_back(cfg.gpr[i]);
+      foreach (cfg.pmp_reg[i]) runtime_reserved.push_back(cfg.pmp_reg[i]);
+      runtime_reserved.push_back(cfg.scratch_reg);
+      runtime_reserved.push_back(cfg.ra);
+      runtime_reserved.push_back(cfg.sp);
+      runtime_reserved.push_back(cfg.tp);
+      runtime_reserved.push_back(ZERO);
+      runtime_reserved.push_back(GP);
+      reserved_rd = new[runtime_reserved.size()];
+      foreach (runtime_reserved[i]) reserved_rd[i] = runtime_reserved[i];
+    end
     order = new[num_of_jump_instr];
     jump = new[num_of_jump_instr];
     foreach (order[i]) begin
@@ -237,7 +258,11 @@ class riscv_jal_instr extends riscv_rand_instr_stream;
     end
     // First instruction
     jump_start = riscv_instr::get_instr(JAL);
-    `DV_CHECK_RANDOMIZE_WITH_FATAL(jump_start, rd == cfg.ra;)
+    if (preserve_runtime_regs) begin
+      `DV_CHECK_RANDOMIZE_WITH_FATAL(jump_start, rd == ZERO;)
+    end else begin
+      `DV_CHECK_RANDOMIZE_WITH_FATAL(jump_start, rd == cfg.ra;)
+    end
     jump_start.imm_str = $sformatf("%0df", order[0]);
     jump_start.label = label;
     // Last instruction
@@ -247,8 +272,12 @@ class riscv_jal_instr extends riscv_rand_instr_stream;
       jump[i] = riscv_instr::get_rand_instr(.include_instr({jal}));
       `DV_CHECK_RANDOMIZE_WITH_FATAL(jump[i],
         if (has_rd) {
-          rd dist {RA := 5, T1 := 2, [SP:T0] :/ 1, [T2:T6] :/ 2};
-          !(rd inside {cfg.reserved_regs});
+          if (preserve_runtime_regs) {
+            !(rd inside {reserved_rd});
+          } else {
+            rd dist {RA := 5, T1 := 2, [SP:T0] :/ 1, [T2:T6] :/ 2};
+            !(rd inside {cfg.reserved_regs});
+          }
         }
       )
       jump[i].label = $sformatf("%0d", i);
@@ -478,7 +507,11 @@ class riscv_int_numeric_corner_stream extends riscv_directed_instr_stream;
     for (int i = 0; i < num_of_instr; i++) begin
       riscv_instr instr = riscv_instr::get_rand_instr(
         .include_category({ARITHMETIC}),
-        .exclude_group({RV32C, RV64C, RV32ZCB, RV64ZCB, RV32F, RV64F, RV32D, RV64D}));
+        // This stream initializes and constrains scalar GPRs. Exclude vector
+        // arithmetic explicitly when Vector is enabled; a vector template
+        // requires vector operand/config setup that does not belong here.
+        .exclude_group({RV32C, RV64C, RV32ZCB, RV64ZCB, RV32F, RV64F,
+                        RV32D, RV64D, RVV, ZVBB}));
       randomize_gpr(instr);
       instr_list.push_back(instr);
     end

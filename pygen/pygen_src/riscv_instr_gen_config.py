@@ -14,6 +14,7 @@ import sys
 import math
 import logging
 import argparse
+import random
 import vsc
 from importlib import import_module
 from pygen_src.riscv_instr_pkg import (mtvec_mode_t, f_rounding_mode_t,
@@ -198,6 +199,9 @@ class riscv_instr_gen_config:
         self.use_push_data_section = self.argv.use_push_data_section
         # Directed boot privileged mode, u, m, s
         self.boot_mode_opts = self.argv.boot_mode
+        # Random boot mode is opt-in.  Keep the historical deterministic
+        # machine-mode default unless the runtime switch is enabled.
+        self.enable_random_boot_mode = self.argv.enable_random_boot_mode
         # self.isa = self.argv.isa
         if self.boot_mode_opts:
             logging.info("Got boot mode option - {}".format(self.boot_mode_opts))
@@ -208,9 +212,11 @@ class riscv_instr_gen_config:
             elif self.boot_mode_opts == "u":
                 self.init_privileged_mode = privileged_mode_t.USER_MODE
             else:
-                logging.error("Illegal boot mode option - {}".format(self.boot_mode_opts))
+                raise ValueError("Illegal boot mode option - {}".format(self.boot_mode_opts))
         self.enable_page_table_exception = self.argv.enable_page_table_exception
         self.no_directed_instr = self.argv.no_directed_instr
+        self.enable_random_directed_instr = self.argv.enable_random_directed_instr
+        self.random_directed_instr_ratio = self.argv.random_directed_instr_ratio
         self.asm_test_suffix = self.argv.asm_test_suffix
         # Enable interrupt bit in MSTATUS (MIE, SIE, UIE)
         self.enable_interrupt = self.argv.enable_interrupt
@@ -301,7 +307,6 @@ class riscv_instr_gen_config:
         if riscv_instr_group_t.RV32C not in rcs.supported_isa:
             self.disable_compressed_instr = 1
         self.setup_instr_distribution()
-        self.get_invalid_priv_lvl_csr()
         # Helpers fields to build the vsc constraints
         self.supported_interrupt_mode = vsc.list_t(vsc.enum_t(mtvec_mode_t))
         self.XLEN = vsc.uint32_t()
@@ -311,8 +316,26 @@ class riscv_instr_gen_config:
         self.supported_interrupt_mode = rcs.supported_interrupt_mode
         self.XLEN = rcs.XLEN
         self.SATP_MODE = rcs.SATP_MODE
+        # The SystemVerilog backend has a full page-table implementation.  The
+        # Python generator still has TODO stubs for page-table construction and
+        # therefore must not enable translation on a non-BARE target: doing so
+        # emits a SATP root reference without defining page_table_0 and leaves
+        # the generated ELF un-linkable.  Target settings may opt in once a
+        # Python page-table implementation is added.
+        self.page_table_supported = bool(
+            getattr(rcs, "PYGEN_PAGE_TABLE_SUPPORTED", False))
+        if (self.SATP_MODE != satp_mode_t.BARE and
+                not self.page_table_supported):
+            logging.warning(
+                "PyFlow target %s has SATP mode %s but no page-table implementation; "
+                "address translation will be disabled for generated programs",
+                self.argv.target, self.SATP_MODE.name)
         self.tvec_ceil = vsc.uint32_t()
         self.tvec_ceil = math.ceil(math.log2((self.XLEN * 4) / 8))
+        # Populate the initial list for callers that inspect the object before
+        # the first randomization.  post_randomize() refreshes it after a
+        # randomly selected boot mode is known.
+        self.get_invalid_priv_lvl_csr()
 
     @vsc.constraint
     def default_c(self):
@@ -336,8 +359,11 @@ class riscv_instr_gen_config:
     # Boot privileged mode distribution
     @vsc.constraint
     def boot_privileged_mode_dist_c(self):
-        # Boot to higher privileged mode more often
-        # TODO
+        # ``init_privil_mode`` is a non-rand mirror updated by pre_randomize().
+        # Do not constrain it against ``init_privileged_mode`` here: PyVSC
+        # elaborates constraints once, during construction, and would capture
+        # the then-current Python enum (normally M-mode).  That makes later
+        # per-iteration S/U selections unsatisfiable.
         pass
 
     @vsc.constraint
@@ -389,8 +415,13 @@ class riscv_instr_gen_config:
         self.sp != self.tp
         self.sp.not_inside(vsc.rangelist(riscv_reg_t.GP,
                                          riscv_reg_t.RA, riscv_reg_t.ZERO))
+        # test_done clears architectural A0 before entering the terminating
+        # trap.  TP is the kernel-stack pointer in the trap prologue, so A0
+        # cannot be selected for TP or the handler would start with a zero
+        # stack address and repeatedly fault while saving registers.
         self.tp.not_inside(vsc.rangelist(riscv_reg_t.GP,
-                                         riscv_reg_t.RA, riscv_reg_t.ZERO))
+                                         riscv_reg_t.RA, riscv_reg_t.ZERO,
+                                         riscv_reg_t.A0))
 
     # This reg is used in various places throughout the generator,
     # so need more conservative constraints on it.
@@ -420,11 +451,17 @@ class riscv_instr_gen_config:
 
     @vsc.constraint
     def addr_translation_c(self):
-        with vsc.if_then((self.init_privil_mode != privileged_mode_t.MACHINE_MODE) &
-                         (self.SATP_MODE != satp_mode_t.BARE)):
-            self.virtual_addr_translation_on == 1
-        with vsc.else_then():
+        # Keep the Python backend linkable until its page-table TODOs are
+        # implemented.  The flag is a plain target capability, so branching
+        # here avoids creating a VSC expression that can never be satisfied.
+        if not self.page_table_supported:
             self.virtual_addr_translation_on == 0
+        else:
+            with vsc.if_then((self.init_privil_mode != privileged_mode_t.MACHINE_MODE) &
+                             (self.SATP_MODE != satp_mode_t.BARE)):
+                self.virtual_addr_translation_on == 1
+            with vsc.else_then():
+                self.virtual_addr_translation_on == 0
 
     @vsc.constraint
     def floating_point_c(self):
@@ -464,16 +501,53 @@ class riscv_instr_gen_config:
             if mode == privileged_mode_t.SUPERVISOR_MODE:
                 self.support_supervisor_mode = 1
 
+        # ``init_privileged_mode`` is intentionally kept as a plain enum for
+        # compatibility with the existing pygen code.  Select it here, before
+        # VSC evaluates the remaining constraints, so each generated iteration
+        # gets a seed-reproducible boot mode without making the mode itself a
+        # solver-owned field.  An explicit +boot_mode remains authoritative.
+        if self.boot_mode_opts:
+            selected_mode = self.init_privileged_mode
+        elif self.enable_random_boot_mode:
+            if not rcs.supported_privileged_mode:
+                raise ValueError("No supported privileged mode is configured")
+            supported_modes = list(rcs.supported_privileged_mode)
+            # Match the SystemVerilog backend's established list-order
+            # distribution while still covering every target-advertised mode.
+            if len(supported_modes) == 2:
+                mode_weights = [6, 4]
+            elif len(supported_modes) == 3:
+                mode_weights = [4, 3, 3]
+            else:
+                mode_weights = [1] * len(supported_modes)
+            selected_mode = random.choices(supported_modes,
+                                           weights=mode_weights, k=1)[0]
+        elif privileged_mode_t.MACHINE_MODE in rcs.supported_privileged_mode:
+            selected_mode = privileged_mode_t.MACHINE_MODE
+        elif rcs.supported_privileged_mode:
+            selected_mode = rcs.supported_privileged_mode[0]
+        else:
+            raise ValueError("No supported privileged mode is configured")
+        if selected_mode not in rcs.supported_privileged_mode:
+            raise ValueError("Boot mode {} is not supported by target {}".format(
+                privileged_mode_t(selected_mode).name, self.argv.target))
+        self.init_privileged_mode = privileged_mode_t(selected_mode)
+        self.init_privil_mode = self.init_privileged_mode
+        logging.info("Selected boot privilege mode: %s",
+                     self.init_privileged_mode.name)
+
     def get_non_reserved_gpr(self):
         pass
 
     def post_randomize(self):
+        self.init_privileged_mode = privileged_mode_t(self.init_privil_mode)
         # Setup the list all reserved registers
         self.reserved_regs.extend((self.tp, self.sp, self.scratch_reg))
         # Need to save all loop registers, and RA/T0
         self.min_stack_len_per_program = 2 * (rcs.XLEN // 8)
         logging.info("min_stack_len_per_program value = {}"
                      .format(self.min_stack_len_per_program))
+        self.get_invalid_priv_lvl_csr()
         self.check_setting()  # check if the setting is legal
 
     def check_setting(self):
@@ -521,28 +595,23 @@ class riscv_instr_gen_config:
     # Populate invalid_priv_mode_csrs with the main implemented CSRs for each supported privilege
     # mode
     def get_invalid_priv_lvl_csr(self):
-        invalid_lvl = []
-        # Debug CSRs are inaccessible from all but Debug Mode
-        # and we cannot boot into Debug Mode.
-        invalid_lvl.append("D")
-        if self.init_privileged_mode == privileged_mode_t.MACHINE_MODE:
-            pass
-        elif self.init_privileged_mode == privileged_mode_t.SUPERVISOR_MODE:
-            invalid_lvl.append("M")
-            logging.info("supr_mode---")
-            logging.debug(invalid_lvl)
-        elif self.init_privileged_mode == privileged_mode_t.USER_MODE:
-            invalid_lvl.append("S")
-            invalid_lvl.append("M")
-            logging.info("usr_mode---")
-            logging.debug(invalid_lvl)
-        else:
+        self.invalid_priv_mode_csrs = []
+        if self.init_privileged_mode not in (privileged_mode_t.USER_MODE,
+                                             privileged_mode_t.SUPERVISOR_MODE,
+                                             privileged_mode_t.MACHINE_MODE):
             logging.critical("Unsupported initialization privilege mode")
             sys.exit(1)
 
-        # implemented_csr from riscv_core_setting.py
+        # The two privilege bits in a CSR address encode the minimum privilege
+        # level required to access it (00=U, 01=S, 11=M; 10 is reserved).
+        # Debug CSRs are a separate namespace and are inaccessible outside
+        # Debug Mode, which this generator never enters.
+        boot_level = int(self.init_privileged_mode)
         for csr in rcs.implemented_csr:
-            if csr in invalid_lvl:
+            csr_addr = int(csr)
+            required_level = (csr_addr >> 8) & 0x3
+            is_debug_csr = 0x7B0 <= csr_addr <= 0x7B3
+            if is_debug_csr or required_level == 0x2 or required_level > boot_level:
                 self.invalid_priv_mode_csrs.append(csr)
 
     def parse_args(self):
@@ -591,6 +660,13 @@ class riscv_instr_gen_config:
                            choices = [0, 1], type = int, default = 0)
         parse.add_argument('--no_directed_instr', help = 'no_directed_instr',
                            choices = [0, 1], type = int, default = 0)
+        parse.add_argument('--enable_random_directed_instr', '--random_directed_instr',
+                           dest = 'enable_random_directed_instr',
+                           help = 'randomly select and inject directed instruction streams',
+                           choices = [0, 1], type = int, default = 0)
+        parse.add_argument('--random_directed_instr_ratio',
+                           help = 'total random directed stream insertions per 1000 instructions',
+                           choices = range(0, 1001), type = int, default = 4)
         parse.add_argument('--no_fence', help = 'no_fence',
                            choices = [0, 1], type = int, default = 1)
         parse.add_argument('--no_delegation', help = 'no_delegation',
@@ -643,6 +719,10 @@ class riscv_instr_gen_config:
                            default = ['ZBB', 'ZBS', 'ZBP', 'ZBE', 'ZBF',
                                       'ZBC', 'ZBR', 'ZBM', 'ZBT', 'ZB_TMP'], nargs = '*')
         parse.add_argument('--boot_mode', help = 'boot_mode', default = "")
+        parse.add_argument('--enable_random_boot_mode', '--random_boot_mode',
+                           dest = 'enable_random_boot_mode',
+                           help = 'randomly select the initial privilege mode from the target-supported modes',
+                           choices = [0, 1], type = int, default = 0)
         parse.add_argument('--asm_test_suffix', help = 'asm_test_suffix', default = "")
         parse.add_argument('--march_isa', help = 'march_isa', default = [],
                            choices = [i.name for i in riscv_instr_group_t], nargs = '*')
@@ -652,7 +732,7 @@ class riscv_instr_gen_config:
             parse.add_argument('--stream_name_{}'.format(i),
                                help = 'stream_name_{}'.format(i), default = "")
             parse.add_argument('--stream_freq_{}'.format(i),
-                               help = 'stream_freq_{}'.format(i), default = 4)
+                               help = 'stream_freq_{}'.format(i), type = int, default = 4)
         parse.add_argument('--start_idx', help='start index', type=int, default=0)
         parse.add_argument('--asm_file_name', help='asm file name',
                            default="riscv_asm_test")

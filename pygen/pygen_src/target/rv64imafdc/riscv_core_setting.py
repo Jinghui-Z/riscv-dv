@@ -27,6 +27,12 @@ XLEN = 64
 # set to BARE if address translation is not supported
 SATP_MODE = satp_mode_t.SV39
 
+# The Python backend does not yet emit/link page tables.  Keep this explicit
+# so S/U boot generation falls back to physical addressing instead of
+# producing an undefined ``page_table_0`` symbol.  The SV target has its own
+# complete page-table implementation and is unaffected by this setting.
+PYGEN_PAGE_TABLE_SUPPORTED = False
+
 # Supported Privileged mode
 supported_privileged_mode = [privileged_mode_t.USER_MODE,
                              privileged_mode_t.SUPERVISOR_MODE,

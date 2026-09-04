@@ -190,6 +190,14 @@ Runtime options of the generator
 +---------------------------------+---------------------------------------------------+---------+
 | boot_mode                       | m:Machine mode, s:Supervisor mode, u:User mode    | m       |
 +---------------------------------+---------------------------------------------------+---------+
+| enable_random_boot_mode         | Randomly select target-supported boot mode        | 0       |
++---------------------------------+---------------------------------------------------+---------+
+| enable_random_directed_instr    | Randomly select directed streams for insertion    | 0       |
++---------------------------------+---------------------------------------------------+---------+
+| random_directed_instr_ratio     | Random directed stream insertions per 1000 instrs | 4       |
++---------------------------------+---------------------------------------------------+---------+
+| enable_random_pmp_exception     | Inject one random PMP load/store permission fault | 0       |
++---------------------------------+---------------------------------------------------+---------+
 | no_directed_instr               | Disable directed instruction stream               | 0       |
 +---------------------------------+---------------------------------------------------+---------+
 | require_signature_addr          | Set to 1 if test needs to talk to testbench       | 0       |
@@ -294,6 +302,104 @@ it with random instructions::
     // An alternative command line options for directed instruction stream
     +stream_name_0=riscv_multi_page_load_store_instr_stream
     +stream_freq_0=4
+
+Random directed instruction stream injection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The regular ``directed_instr_N`` options above insert a deterministic number
+of instances for each configured stream.  To select a directed stream at
+random for each insertion, enable the random injection mode in ``gen_opts``::
+
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +directed_instr_0=riscv_loop_instr,10
+    +directed_instr_1=riscv_jal_instr,2
+
+``random_directed_instr_ratio`` is the total insertion density per 1000 base
+instructions (the default is ``4``).  The ratios on ``directed_instr_N`` are
+selection weights, so the example selects ``riscv_loop_instr`` five times as
+often as ``riscv_jal_instr``.  An explicit ``directed_instr_N`` or
+``stream_name_N`` list is the candidate allow-list; it is not combined with
+the automatic candidates.
+
+If no candidate list is provided, every independently randomizable stream
+supported by the active backend and target configuration is enabled with
+equal selection weight.  The SystemVerilog backend always includes
+``riscv_int_numeric_corner_stream``; it also includes ``riscv_loop_instr`` and
+``riscv_jal_instr`` unless ``no_branch_jump`` is set (DSim excludes the loop
+stream).  When load/store generation is enabled and a generated data page is
+available, it includes the single, stress, random, register-hazard,
+load/store-hazard, multi-page and memory-region load/store streams. Multi-page
+access requires at least two active data regions.  CBO,
+Vector, legacy Vector AMO and scalar AMO/LR-SC/shared-memory streams are added
+only when their extension switches, ISA groups and backing regions make them
+valid for the current test.
+
+Abstract base classes, jump/push/pop helpers that require caller-owned setup,
+and ``riscv_load_store_rand_addr_instr_stream`` are not automatic candidates.
+The last stream depends on a platform-specific physical memory aperture and
+remains available through an explicit directed-stream option.  The alias
+``+random_directed_instr=1`` is also accepted.  ``+no_directed_instr=1`` takes
+precedence and disables both regular and random directed streams.
+
+For the PyFlow backend, random injection accepts streams that can be
+constructed and randomized as a non-empty embedded sequence:
+``riscv_int_numeric_corner_stream``, ``riscv_jal_instr``, the four
+``riscv_load_store_*``/``riscv_single_load_store_instr_stream`` streams, and
+``riscv_loop_instr``.  Entries that are implemented only for the SV backend,
+or are not safe to randomize independently, are skipped with a warning.  The
+four load/store candidates are filtered when ``no_data_page`` or
+``no_load_store`` is set, and loop/JAL are filtered when ``no_branch_jump`` is
+set.  A stream that still fails for a target-specific configuration is removed
+from the candidates for that generation rather than aborting the test.
+
+Random boot privilege mode
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, generated programs boot in machine mode (or the first mode
+advertised by a target that does not implement machine mode).  Enable random
+boot-mode selection in ``gen_opts`` to choose a supported privilege mode for
+each generated iteration::
+
+    +enable_random_boot_mode=1
+
+The alias ``+random_boot_mode=1`` is accepted as well.  The selection is made
+from ``supported_privileged_mode`` in the target configuration, so an
+unsupported S/U mode is never emitted.  An explicit ``+boot_mode=m``,
+``+boot_mode=s`` or ``+boot_mode=u`` always overrides the random switch.  The
+selected mode is used to rebuild the invalid-privilege CSR set for that
+iteration.  The selected ISS must expose every mode that can be chosen; for
+Spike on a custom target advertising M/S/U, pass ``--priv msu``.  Predefined
+targets configure their advertised lower privilege modes automatically.
+
+Random PMP permission exception injection
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Enable a recoverable PMP load/store permission fault in ``gen_opts`` with::
+
+    +enable_random_pmp_exception=1
+
+The generator randomly denies either load or store permission for the first
+user data region, emits one access to that region, and lets the PMP exception
+handler repair the permission before retrying.  The current recovery routine
+is valid for S/U boot with traps kept in M-mode; M-mode MPRV recovery and
+delegated S-mode handlers are rejected until dedicated mode-specific handlers
+are added.  The alias
+``+pmp_exception_inject=1`` is also accepted.
+
+PMP setup and recovery are implemented only by the SystemVerilog generator;
+the PyFlow backend still has PMP generation marked TODO and does not provide
+this feature.
+
+This mode requires ``support_pmp=1``, a U- or S-mode implementation,
+the normal PMP exception handler, a generated data page, and
+``+no_delegation=1``.  It is incompatible with M-mode boot,
+``+bare_program_mode=1``, ``+no_data_page=1`` and
+``+suppress_pmp_setup=1``; invalid combinations fail generation instead of
+silently disabling injection.  ePMP targets must use the legacy
+``MSECCFG(MML=0,MMWP=0,RLB=1)`` setting.  With virtual memory enabled, the
+handler maps ``mtval``/``mepc`` back to the physical addresses used by PMP.
+The current injected recovery path is limited to one hart.
 
 Integrate a new ISS
 ~~~~~~~~~~~~~~~~~~~

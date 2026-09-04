@@ -50,9 +50,16 @@ class riscv_reg_field:
             self, self.bit_width, hex(self.val), self.access_type))
 
     def post_randomize(self):
-        mask = vsc.bit_t(rcs.XLEN, 2**rcs.XLEN - 1)
-        mask = mask >> (rcs.XLEN - self.bit_width)
-        self.val = mask & self.val
+        # ``vsc.bit_t`` values created here are not attached to a VSC field
+        # model.  Applying an overloaded operator to such a temporary makes
+        # PyVSC try to build an ``ExprFieldRefModel`` with ``fm=None`` (the
+        # ``Field Model None specified`` failure seen when randomizing
+        # SSTATUS/USTATUS).  Keep this post-randomize normalization purely in
+        # Python instead.  ``self.val`` is already a concrete value at this
+        # point, and masking it as an integer preserves the intended field
+        # width without constructing a solver expression.
+        mask = (1 << self.bit_width) - 1
+        self.val = int(self.val) & mask
 
 
 # Base class for RISC-V register

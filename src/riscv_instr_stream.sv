@@ -163,6 +163,10 @@ class riscv_rand_instr_stream extends riscv_instr_stream;
 
   riscv_instr_gen_config  cfg;
   bit                     kernel_mode;
+  // Set for streams selected by random directed-instruction injection. Such
+  // streams are embedded in a live call/stack context and should preserve the
+  // generator's runtime registers when their implementation supports it.
+  bit                     preserve_runtime_regs;
   riscv_instr_name_t      allowed_instr[$];
   int unsigned            category_dist[riscv_instr_category_t];
 

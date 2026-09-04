@@ -152,6 +152,12 @@ class riscv_rand_instr_stream(riscv_instr_stream):
         # calling super constructor
         super().__init__()
         self.kernel_mode = 0
+        # Directed streams injected into a live program may not clobber the
+        # registers used by the call/stack/PMP machinery.  The generator sets
+        # this flag for streams selected by the random-injection path; keep it
+        # opt-in so legacy explicitly-directed streams retain their historical
+        # coverage profile.
+        self.preserve_runtime_regs = 0
         self.allowed_instr = []
         self.category_dist = []
 
@@ -236,6 +242,15 @@ class riscv_rand_instr_stream(riscv_instr_stream):
             include_instr = self.allowed_instr, exclude_instr = exclude_instr,
             include_group = include_group)
         instr = self.randomize_gpr(instr)
+        # CSR instructions carry a 12-bit address that is not encoded in the
+        # instruction-name template. The old PyFlow path left this field
+        # unconstrained, producing assembler errors (and unexpected traps).
+        # Apply the filter built by create_csr_filter() after operand
+        # randomization so the address is always architectural.
+        category = (instr.category.get_val()
+                    if hasattr(instr.category, "get_val") else instr.category)
+        if int(category) == int(riscv_instr_category_t.CSR):
+            instr.csr = riscv_instr.pick_csr()
         return instr
 
     def randomize_gpr(self, instr):

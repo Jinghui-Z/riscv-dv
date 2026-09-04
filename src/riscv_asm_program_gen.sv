@@ -62,6 +62,46 @@ class riscv_asm_program_gen extends uvm_object;
 
   // This is the main function to generate all sections of the program.
   virtual function void gen_program();
+    if (cfg.pmp_cfg.enable_random_pmp_exception) begin
+      // Parse command-line PMP/ePMP overrides before validating the injection
+      // mode.  The injected handler is deliberately an M-mode routine and
+      // assumes the legacy PMP permission model; accepting a configuration
+      // that violates either assumption produces a generated program that
+      // can trap recursively (or silently bypass the denied region).
+      cfg.pmp_cfg.setup_pmp();
+      if (!support_pmp) begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception requires target support_pmp=1")
+      end
+      if (!cfg.pmp_cfg.enable_pmp_exception_handler) begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception requires the PMP exception handler")
+      end
+      if (cfg.pmp_cfg.suppress_pmp_setup) begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception conflicts with +suppress_pmp_setup=1")
+      end
+      if (cfg.bare_program_mode) begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception is not supported in bare program mode")
+      end
+      if (cfg.no_data_page || (cfg.mem_region.size() == 0)) begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception requires a generated data region")
+      end
+      if (cfg.num_of_harts != 1) begin
+        `uvm_fatal(`gfn,
+                  "+enable_random_pmp_exception currently supports exactly one hart")
+      end
+      if (cfg.init_privileged_mode == MACHINE_MODE) begin
+        `uvm_fatal(`gfn,
+                  "+enable_random_pmp_exception currently requires S/U boot; M-mode MPRV trap recovery is unsupported")
+      end
+      if (!cfg.no_delegation) begin
+        `uvm_fatal(`gfn,
+                  "+enable_random_pmp_exception requires +no_delegation=1 until S-mode PMP handlers are implemented")
+      end
+      if (support_epmp && (cfg.pmp_cfg.mseccfg.mml || cfg.pmp_cfg.mseccfg.mmwp ||
+                           !cfg.pmp_cfg.mseccfg.rlb)) begin
+        `uvm_fatal(`gfn,
+                  "+enable_random_pmp_exception requires legacy MSECCFG (MML=0, MMWP=0, RLB=1)")
+      end
+    end
     // Prevent generation of PMP exception handling code where PMP is not supported
     if (!support_pmp) begin
       cfg.pmp_cfg.enable_pmp_exception_handler = 1'b0;
@@ -132,6 +172,10 @@ class riscv_asm_program_gen extends uvm_object;
                       $sformatf("%sla x%0d, test_done", indent, cfg.scratch_reg),
                       $sformatf("%sjalr x0, x%0d, 0", indent, cfg.scratch_reg)
                      };
+      // Keep the intentional PMP fault after main. The existing load-fault
+      // recovery routine uses the main label to distinguish a faulting user
+      // access from a load performed inside the trap handler.
+      gen_pmp_exception_test(hart);
       // Test done section
       // If PMP isn't supported, generate this in the normal location
       if (hart == 0 & !riscv_instr_pkg::support_pmp) begin
@@ -437,7 +481,11 @@ class riscv_asm_program_gen extends uvm_object;
     core_is_initialized();
     gen_dummy_csr_write(); // TODO add a way to disable xStatus read
     if (riscv_instr_pkg::support_pmp) begin
-      str = {indent, "j main"};
+      if (cfg.pmp_cfg.pmp_exception_active) begin
+        str = {indent, $sformatf("j %0s", get_label("pmp_exception_test", hart))};
+      end else begin
+        str = {indent, $sformatf("j %0s", get_label("main", hart))};
+      end
       instr_stream.push_back(str);
     end
   endfunction
@@ -867,8 +915,33 @@ class riscv_asm_program_gen extends uvm_object;
   // Setup PMP CSR configuration
   virtual function void setup_pmp(int hart);
     string instr[$];
+    bit [XLEN - 1 : 0] pmp_phys_offset;
     if (riscv_instr_pkg::support_pmp) begin
-      if(cfg.pmp_cfg.suppress_pmp_setup) begin
+      // The configuration object is reused for every generated iteration and
+      // hart.  Clear the per-program state before evaluating the guards so a
+      // previous eligible iteration cannot redirect init into a stale section.
+      cfg.pmp_cfg.pmp_exception_active = 1'b0;
+      cfg.pmp_cfg.pmp_exception_addr_translation = 1'b0;
+      // Permission-fault injection needs a real user data section and runs
+      // from the selected lower privilege mode so unlocked PMP permissions
+      // are enforced and can be repaired by the M-mode handler.
+      if (cfg.pmp_cfg.enable_random_pmp_exception) begin
+        cfg.pmp_cfg.setup_pmp();
+        // VCS requires an lvalue of exactly the formal type for this packed
+        // argument; materialize the conditional page-table base first.
+        if (page_table_list != null) begin
+          pmp_phys_offset = page_table_list.start_pa;
+        end else begin
+          pmp_phys_offset = 'h8000_0000;
+        end
+        cfg.pmp_cfg.gen_pmp_exception_setup(
+            '{cfg.scratch_reg, cfg.gpr[0]},
+            $sformatf("%0s%0s", hart_prefix(hart), cfg.mem_region[0].name),
+            cfg.mem_region[0].size_in_bytes,
+            instr,
+            cfg.virtual_addr_translation_on,
+            pmp_phys_offset);
+      end else if(cfg.pmp_cfg.suppress_pmp_setup) begin
         // When PMP setup is suppressed generate a configuration that gives unrestricted access to
         // all memory for both M and U mode
         cfg.pmp_cfg.gen_pmp_enable_all(cfg.scratch_reg, instr);
@@ -879,6 +952,33 @@ class riscv_asm_program_gen extends uvm_object;
 
       gen_section(get_label("pmp_setup", hart), instr);
     end
+  endfunction
+
+  // Generate one access to the denied PMP data region and then continue into
+  // the regular main program. The trap handler changes the matching PMP
+  // permission and mret retries this exact instruction.
+  virtual function void gen_pmp_exception_test(int hart);
+    string instr[$];
+    string fault_label;
+    privileged_mode_t mprv_mode = USER_MODE;
+    if (!cfg.pmp_cfg.pmp_exception_active) return;
+    if (cfg.init_privileged_mode == MACHINE_MODE) begin
+      if (USER_MODE inside {riscv_instr_pkg::supported_privileged_mode}) begin
+        mprv_mode = USER_MODE;
+      end else if (SUPERVISOR_MODE inside {riscv_instr_pkg::supported_privileged_mode}) begin
+        mprv_mode = SUPERVISOR_MODE;
+      end else begin
+        `uvm_fatal(`gfn, "+enable_random_pmp_exception requires U- or S-mode PMP semantics")
+      end
+    end
+    fault_label = $sformatf("%0s%0s", hart_prefix(hart), cfg.mem_region[0].name);
+    cfg.pmp_cfg.gen_pmp_exception_access(cfg.gpr[0], cfg.gpr[1], cfg.scratch_reg,
+                                         fault_label, instr,
+                                         cfg.init_privileged_mode == MACHINE_MODE,
+                                         mprv_mode);
+    instr.push_back($sformatf("la x%0d, %0s", cfg.scratch_reg, get_label("main", hart)));
+    instr.push_back($sformatf("jalr x0, x%0d, 0", cfg.scratch_reg));
+    gen_section(get_label("pmp_exception_test", hart), instr);
   endfunction
 
   // Generates a directed stream of instructions to write random values to all supported
@@ -1697,6 +1797,92 @@ class riscv_asm_program_gen extends uvm_object;
     end
   endfunction
 
+  virtual function void add_random_directed_instr_candidate(
+      input string name,
+      ref string names[$],
+      ref int unsigned weights[$],
+      ref int unsigned weight_sum);
+    names.push_back(name);
+    weights.push_back(1);
+    weight_sum++;
+  endfunction
+
+  // Build the complete set of independently randomizable directed streams for
+  // the active backend and target configuration. Helper/base streams and the
+  // arbitrary-address stress stream are deliberately not automatic candidates:
+  // they need setup that an embedded stream cannot infer safely.
+  virtual function void get_random_directed_instr_stream_candidates(
+      input bit kernel_mode,
+      ref string names[$],
+      ref int unsigned weights[$],
+      ref int unsigned weight_sum);
+    int unsigned data_page_count;
+    bit atomic_region_available;
+
+    if (!cfg.no_branch_jump) begin
+      `ifndef DSIM
+        add_random_directed_instr_candidate("riscv_loop_instr", names, weights, weight_sum);
+      `endif
+      add_random_directed_instr_candidate("riscv_jal_instr", names, weights, weight_sum);
+    end
+    add_random_directed_instr_candidate(
+        "riscv_int_numeric_corner_stream", names, weights, weight_sum);
+
+    if (kernel_mode) begin
+      data_page_count = cfg.s_mem_region.size();
+    end else begin
+      data_page_count = cfg.mem_region.size();
+    end
+    if (!cfg.no_load_store && !cfg.no_data_page && (data_page_count > 0)) begin
+      add_random_directed_instr_candidate(
+          "riscv_single_load_store_instr_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_load_store_stress_instr_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_load_store_rand_instr_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_hazard_instr_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_load_store_hazard_instr_stream", names, weights, weight_sum);
+      if (data_page_count >= 2) begin
+        add_random_directed_instr_candidate(
+            "riscv_multi_page_load_store_instr_stream", names, weights, weight_sum);
+      end
+      add_random_directed_instr_candidate(
+          "riscv_mem_region_stress_test", names, weights, weight_sum);
+      if (cfg.enable_zicbom_extension || cfg.enable_zicboz_extension) begin
+        add_random_directed_instr_candidate(
+            "riscv_cbo_instr_stream", names, weights, weight_sum);
+      end
+      if (cfg.enable_vector_extension) begin
+        add_random_directed_instr_candidate(
+            "riscv_vector_load_store_instr_stream", names, weights, weight_sum);
+        // Zvamo belongs to the pre-1.0 vector ISA and is not legal when the
+        // ratified Vector 1.0 encoding/syntax is selected.
+        if (!cfg.use_vector_1_0 &&
+            ((RV32A inside {supported_isa}) || (RV64A inside {supported_isa}))) begin
+          add_random_directed_instr_candidate(
+              "riscv_vector_amo_instr_stream", names, weights, weight_sum);
+        end
+      end
+    end
+
+    // gen_program emits the shared AMO data section only when RV32A is in the
+    // active ISA list. Use that exact condition so every selected stream has a
+    // corresponding linker symbol.
+    atomic_region_available = !cfg.no_load_store && !cfg.no_data_page &&
+                              (cfg.amo_region.size() > 0) &&
+                              (RV32A inside {supported_isa});
+    if (atomic_region_available) begin
+      add_random_directed_instr_candidate(
+          "riscv_load_store_shared_mem_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_lr_sc_instr_stream", names, weights, weight_sum);
+      add_random_directed_instr_candidate(
+          "riscv_amo_instr_stream", names, weights, weight_sum);
+    end
+  endfunction
+
   // Generate directed instruction stream based on the ratio setting
   virtual function void generate_directed_instr_stream(input int hart,
                                                        input string label,
@@ -1707,10 +1893,93 @@ class riscv_asm_program_gen extends uvm_object;
     uvm_object object_h;
     riscv_rand_instr_stream new_instr_stream;
     int unsigned instr_insert_cnt;
-    int unsigned idx;
+    int unsigned idx = 0;
+    string random_stream_names[$];
+    int unsigned random_stream_weights[$];
+    int unsigned random_stream_weight_sum = 0;
+    string random_stream_list;
     uvm_coreservice_t coreservice = uvm_coreservice_t::get();
     uvm_factory factory = coreservice.get_factory();
     if(cfg.no_directed_instr) return;
+    if (cfg.enable_random_directed_instr) begin
+      // In random mode, the configured ratios are weights used to select the
+      // next stream. The total insertion density comes from the dedicated
+      // random_directed_instr_ratio knob.
+      foreach (directed_instr_stream_ratio[instr_stream_name]) begin
+        if (directed_instr_stream_ratio[instr_stream_name] == 0) continue;
+        `ifdef DSIM
+          // DSim cannot randomize the dynamic arrays used by loop streams.
+          if (uvm_is_match("*loop*", instr_stream_name)) continue;
+        `endif
+        random_stream_names.push_back(instr_stream_name);
+        random_stream_weights.push_back(directed_instr_stream_ratio[instr_stream_name]);
+        random_stream_weight_sum += directed_instr_stream_ratio[instr_stream_name];
+      end
+      if (directed_instr_stream_ratio.num() == 0) begin
+        get_random_directed_instr_stream_candidates(
+            kernel_mode, random_stream_names, random_stream_weights,
+            random_stream_weight_sum);
+      end
+      if ((cfg.random_directed_instr_ratio == 0) ||
+          (random_stream_weight_sum == 0)) begin
+        `uvm_info(get_full_name(),
+                  "Random directed instruction injection has no enabled candidates",
+                  UVM_LOW)
+        return;
+      end
+      foreach (random_stream_names[i]) begin
+        if (i > 0) random_stream_list = {random_stream_list, ", "};
+        random_stream_list = {random_stream_list, random_stream_names[i]};
+      end
+      `uvm_info(get_full_name(),
+                $sformatf("Random directed instruction candidates: %0s", random_stream_list),
+                UVM_LOW)
+      instr_insert_cnt = original_instr_cnt * cfg.random_directed_instr_ratio / 1000;
+      if (instr_insert_cnt < min_insert_cnt) begin
+        instr_insert_cnt = min_insert_cnt;
+      end
+      `uvm_info(get_full_name(), $sformatf(
+                "Randomly insert %0d directed instr streams into %0s at ratio %0d/1000",
+                instr_insert_cnt, label, cfg.random_directed_instr_ratio), UVM_LOW)
+      for (int i = 0; i < instr_insert_cnt; i++) begin
+        int unsigned selected_weight;
+        int unsigned accumulated_weight = 0;
+        int selected_idx = -1;
+        string selected_stream_name;
+        string name;
+        selected_weight = $urandom_range(random_stream_weight_sum, 1);
+        foreach (random_stream_names[j]) begin
+          accumulated_weight += random_stream_weights[j];
+          if ((selected_idx < 0) && (selected_weight <= accumulated_weight)) begin
+            selected_idx = j;
+          end
+        end
+        `DV_CHECK_FATAL(selected_idx >= 0, "Cannot select a random directed instruction stream")
+        selected_stream_name = random_stream_names[selected_idx];
+        `uvm_info(get_full_name(), $sformatf(
+                  "Selected random directed instruction stream: %0s", selected_stream_name),
+                  UVM_LOW)
+        name = $sformatf("%0s_%0d", selected_stream_name, i);
+        object_h = factory.create_object_by_name(selected_stream_name, get_full_name(), name);
+        if (object_h == null) begin
+          `uvm_fatal(get_full_name(), $sformatf("Cannot create instr stream %0s", name))
+        end
+        if ($cast(new_instr_stream, object_h)) begin
+          new_instr_stream.cfg = cfg;
+          new_instr_stream.hart = hart;
+          new_instr_stream.label = $sformatf("%0s_%0d", label, idx);
+          new_instr_stream.kernel_mode = kernel_mode;
+          new_instr_stream.preserve_runtime_regs = 1'b1;
+          `DV_CHECK_RANDOMIZE_FATAL(new_instr_stream)
+          instr_stream = {instr_stream, new_instr_stream};
+        end else begin
+          `uvm_fatal(get_full_name(), $sformatf("Cannot cast instr stream %0s", name))
+        end
+        idx++;
+      end
+      instr_stream.shuffle();
+      return;
+    end
     foreach(directed_instr_stream_ratio[instr_stream_name]) begin
       instr_insert_cnt = original_instr_cnt * directed_instr_stream_ratio[instr_stream_name] / 1000;
       if(instr_insert_cnt <= min_insert_cnt) begin

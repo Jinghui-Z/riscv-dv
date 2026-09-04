@@ -42,10 +42,52 @@ class riscv_loop_instr extends riscv_rand_instr_stream;
       foreach (cfg.reserved_regs[j]) {
         loop_cnt_reg[i] != cfg.reserved_regs[j];
       }
+      // A loop selected by the random directed-instruction injector is
+      // embedded in a live program.  Keep both the generator-owned scratch
+      // registers and the architectural call/stack registers out of the
+      // counter operands so the loop cannot corrupt a return path or trap
+      // handler state.  The explicit foreach form is intentional: VCS and
+      // other simulators differ in how they elaborate ``inside`` with
+      // dynamic/fixed arrays.
+      if (preserve_runtime_regs) {
+        loop_cnt_reg[i] != RA;
+        loop_cnt_reg[i] != SP;
+        loop_cnt_reg[i] != TP;
+        loop_cnt_reg[i] != GP;
+        loop_cnt_reg[i] != cfg.scratch_reg;
+        loop_cnt_reg[i] != cfg.sp;
+        loop_cnt_reg[i] != cfg.tp;
+        loop_cnt_reg[i] != cfg.ra;
+        foreach (cfg.gpr[j]) {
+          loop_cnt_reg[i] != cfg.gpr[j];
+        }
+        foreach (cfg.pmp_reg[j]) {
+          loop_cnt_reg[i] != cfg.pmp_reg[j];
+        }
+      }
     }
     foreach (loop_limit_reg[i]) {
       foreach (cfg.reserved_regs[j]) {
         loop_limit_reg[i] != cfg.reserved_regs[j];
+      }
+      if (preserve_runtime_regs) {
+        // ZERO remains legal here because C.BEQZ/C.BNEZ intentionally use it
+        // as their implicit comparison operand.  Non-compressed branches
+        // already force a non-zero limit below.
+        loop_limit_reg[i] != RA;
+        loop_limit_reg[i] != SP;
+        loop_limit_reg[i] != TP;
+        loop_limit_reg[i] != GP;
+        loop_limit_reg[i] != cfg.scratch_reg;
+        loop_limit_reg[i] != cfg.sp;
+        loop_limit_reg[i] != cfg.tp;
+        loop_limit_reg[i] != cfg.ra;
+        foreach (cfg.gpr[j]) {
+          loop_limit_reg[i] != cfg.gpr[j];
+        }
+        foreach (cfg.pmp_reg[j]) {
+          loop_limit_reg[i] != cfg.pmp_reg[j];
+        }
       }
     }
     unique {loop_cnt_reg, loop_limit_reg};
@@ -114,7 +156,29 @@ class riscv_loop_instr extends riscv_rand_instr_stream;
 
   function void post_randomize();
     riscv_instr_name_t exclude_instr[];
-    reserved_rd = {loop_cnt_reg, loop_limit_reg};
+    riscv_reg_t runtime_reserved[$];
+    if (preserve_runtime_regs) begin
+      // ``reserved_rd`` is a dynamic array, not a queue.  Build the complete
+      // protected set in a temporary queue and materialize it before the
+      // generic body randomization uses the array in its constraints.
+      foreach (loop_cnt_reg[i]) runtime_reserved.push_back(loop_cnt_reg[i]);
+      foreach (loop_limit_reg[i]) runtime_reserved.push_back(loop_limit_reg[i]);
+      runtime_reserved.push_back(RA);
+      runtime_reserved.push_back(SP);
+      runtime_reserved.push_back(TP);
+      runtime_reserved.push_back(GP);
+      runtime_reserved.push_back(ZERO);
+      runtime_reserved.push_back(cfg.scratch_reg);
+      runtime_reserved.push_back(cfg.sp);
+      runtime_reserved.push_back(cfg.tp);
+      runtime_reserved.push_back(cfg.ra);
+      foreach (cfg.gpr[i]) runtime_reserved.push_back(cfg.gpr[i]);
+      foreach (cfg.pmp_reg[i]) runtime_reserved.push_back(cfg.pmp_reg[i]);
+      reserved_rd = new[runtime_reserved.size()];
+      foreach (runtime_reserved[i]) reserved_rd[i] = runtime_reserved[i];
+    end else begin
+      reserved_rd = {loop_cnt_reg, loop_limit_reg};
+    end
     // Figure out which instructions we can no longer use after the loop regs are decided
     update_excluded_instr(exclude_instr);
     // Generate instructions that mixed with the loop instructions

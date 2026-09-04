@@ -104,6 +104,33 @@ class riscv_jal_instr(riscv_rand_instr_stream):
     def instr_c(self):
         self.num_of_jump_instr in vsc.rangelist(vsc.rng(10, 30))
 
+    def _runtime_reserved_regs(self):
+        """Return registers that must survive an embedded JAL stream.
+
+        Configuration fields are PyVSC enum/list objects and list entries can
+        be plain integers after randomization. Normalize them to architectural
+        enum values so the same set can be used by post-randomize constraints.
+        """
+        regs = []
+
+        def add_reg(reg):
+            try:
+                reg = riscv_reg_t(int(reg))
+            except (TypeError, ValueError):
+                return
+            if reg not in regs:
+                regs.append(reg)
+
+        for reg in cfg.reserved_regs:
+            add_reg(reg)
+        for reg in cfg.gpr:
+            add_reg(reg)
+        for attr in ("pmp_reg", "scratch_reg", "ra", "sp", "tp"):
+            add_reg(getattr(cfg, attr))
+        for reg in (riscv_reg_t.ZERO, riscv_reg_t.GP):
+            add_reg(reg)
+        return regs
+
     def post_randomize(self):
         order = []
         RA = cfg.ra
@@ -119,10 +146,21 @@ class riscv_jal_instr(riscv_rand_instr_stream):
             if rcs.XLEN == 32:
                 jal.append(riscv_instr_name_t.C_JAL)
 
+        # Randomly embedded streams must leave the caller's runtime state
+        # intact. Keep the old JAL-link behavior for explicitly directed
+        # streams, while making the new random-injection path safe for main and
+        # sub-program call stacks alike.
+        runtime_reserved = self._runtime_reserved_regs()
+        if self.preserve_runtime_regs:
+            self.reserved_rd = list(runtime_reserved)
+
         # First instruction
         self.jump_start = riscv_instr.get_instr(riscv_instr_name_t.JAL)
         with self.jump_start.randomize_with():
-            self.jump_start.rd == RA
+            if self.preserve_runtime_regs:
+                self.jump_start.rd == riscv_reg_t.ZERO
+            else:
+                self.jump_start.rd == RA
         self.jump_start.imm_str = "{}f".format(order[0])
         self.jump_start.label = self.label
 
@@ -133,11 +171,14 @@ class riscv_jal_instr(riscv_rand_instr_stream):
             self.jump[i] = riscv_instr.get_rand_instr(include_instr = [jal[0]])
             with self.jump[i].randomize_with():
                 if self.jump[i].has_rd:
-                    vsc.dist(self.jump[i].rd, [vsc.weight(riscv_reg_t.RA, 5), vsc.weight(
-                        vsc.rng(riscv_reg_t.SP, riscv_reg_t.T0), 1),
-                        vsc.weight(vsc.rng(riscv_reg_t.T2, riscv_reg_t.T6), 2)])
-                    self.jump[i].rd.not_inside(cfg.reserved_regs)
-            self.jump[i].label = "{}".format(i)
+                    if self.preserve_runtime_regs:
+                        self.jump[i].rd.not_inside(vsc.rangelist(runtime_reserved))
+                    else:
+                        vsc.dist(self.jump[i].rd, [vsc.weight(riscv_reg_t.RA, 5), vsc.weight(
+                            vsc.rng(riscv_reg_t.SP, riscv_reg_t.T0), 1),
+                            vsc.weight(vsc.rng(riscv_reg_t.T2, riscv_reg_t.T6), 2)])
+                        self.jump[i].rd.not_inside(cfg.reserved_regs)
+                self.jump[i].label = "{}".format(i)
 
         for i in range(len(order)):
             if i == self.num_of_jump_instr - 1:

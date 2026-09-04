@@ -182,11 +182,19 @@ class riscv_instr_gen_config extends uvm_object;
   bit                    use_push_data_section = 0;
   // Directed boot privileged mode, u, m, s
   string                 boot_mode_opts;
+  // Select the initial privilege mode randomly from the target-supported modes.
+  // This is opt-in so existing testlists retain their historical M-mode default.
+  bit                    enable_random_boot_mode = 1'b0;
   int                    enable_page_table_exception;
   // 0: legacy mixed page-table faults, 1: Svade A=0 only, 2: Svade D=0 only.
   int                    svade_fault_mode = 0;
   bit                    enable_svpbmt = 1'b0;
   bit                    no_directed_instr;
+  // Randomly inject directed instruction streams into each generated sequence.
+  // The existing +directed_instr_N=name,ratio options provide the weighted
+  // candidate list; when no list is supplied, riscv_loop_instr is used.
+  bit                    enable_random_directed_instr = 1'b0;
+  int                    random_directed_instr_ratio = 4;
   // A name suffix for the generated assembly program
   string                 asm_test_suffix;
   // Enable interrupt bit in MSTATUS (MIE, SIE, UIE)
@@ -500,7 +508,12 @@ class riscv_instr_gen_config extends uvm_object;
     }
     sp != tp;
     !(sp inside {GP, RA, ZERO});
-    !(tp inside {GP, RA, ZERO});
+    // test_done uses the architectural A0 register as the result value
+    // immediately before raising the terminating trap.  The trap prologue
+    // uses TP as the kernel-stack pointer, so selecting A0 for TP would turn
+    // that result write into a zero stack pointer and cause an endless chain
+    // of store-access faults in the handler.
+    !(tp inside {GP, RA, ZERO, A0});
   }
 
   // This reg is used in various places throughout the generator,
@@ -583,10 +596,13 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_array_enum(privileged_reg_t, add_csr_write, UVM_DEFAULT)
     `uvm_field_array_enum(privileged_reg_t, remove_csr_write, UVM_DEFAULT)
     `uvm_field_string(boot_mode_opts, UVM_DEFAULT)
+    `uvm_field_int(enable_random_boot_mode, UVM_DEFAULT)
     `uvm_field_int(enable_page_table_exception, UVM_DEFAULT)
     `uvm_field_int(svade_fault_mode, UVM_DEFAULT)
     `uvm_field_int(enable_svpbmt, UVM_DEFAULT)
     `uvm_field_int(no_directed_instr, UVM_DEFAULT)
+    `uvm_field_int(enable_random_directed_instr, UVM_DEFAULT)
+    `uvm_field_int(random_directed_instr_ratio, UVM_DEFAULT)
     `uvm_field_int(enable_interrupt, UVM_DEFAULT)
     `uvm_field_int(enable_timer_irq, UVM_DEFAULT)
     `uvm_field_int(bare_program_mode, UVM_DEFAULT)
@@ -669,6 +685,8 @@ class riscv_instr_gen_config extends uvm_object;
 
   function new (string name = "");
     string s;
+    string random_directed_instr_arg;
+    string random_boot_mode_arg;
     riscv_instr_group_t march_isa[];
     super.new(name);
     init_delegation();
@@ -700,6 +718,22 @@ class riscv_instr_gen_config extends uvm_object;
     get_bool_arg_value("+enable_sscofpmf=", enable_sscofpmf);
     get_bool_arg_value("+no_data_page=", no_data_page);
     get_bool_arg_value("+no_directed_instr=", no_directed_instr);
+    get_bool_arg_value("+enable_random_directed_instr=", enable_random_directed_instr);
+    // Short alias retained for testlists that prefer a compact option name.
+    if (inst.get_arg_value("+random_directed_instr=", random_directed_instr_arg)) begin
+      enable_random_directed_instr = random_directed_instr_arg.atobin();
+    end
+    get_int_arg_value("+random_directed_instr_ratio=", random_directed_instr_ratio);
+    if ((random_directed_instr_ratio < 0) || (random_directed_instr_ratio > 1000)) begin
+      `uvm_fatal(get_full_name(), $sformatf(
+                "random_directed_instr_ratio must be in [0:1000], got %0d",
+                random_directed_instr_ratio))
+    end
+    get_bool_arg_value("+enable_random_boot_mode=", enable_random_boot_mode);
+    // Short alias retained for existing/local testlists.
+    if (inst.get_arg_value("+random_boot_mode=", random_boot_mode_arg)) begin
+      enable_random_boot_mode = random_boot_mode_arg.atobin();
+    end
     get_bool_arg_value("+no_fence=", no_fence);
     get_bool_arg_value("+no_delegation=", no_delegation);
     get_int_arg_value("+illegal_instr_ratio=", illegal_instr_ratio);
@@ -784,8 +818,30 @@ class riscv_instr_gen_config extends uvm_object;
         default: `uvm_fatal(get_full_name(),
                   $sformatf("Illegal boot mode option - %0s", boot_mode_opts))
       endcase
+      if (!(init_privileged_mode inside {riscv_instr_pkg::supported_privileged_mode})) begin
+        `uvm_fatal(get_full_name(), $sformatf(
+                  "Requested boot mode %0s is not supported by this target",
+                  init_privileged_mode.name()))
+      end
       init_privileged_mode.rand_mode(0);
       addr_translaction_rnd_order_c.constraint_mode(0);
+    end else if (!enable_random_boot_mode) begin
+      // Keep the legacy default deterministic when random boot selection is not
+      // requested.  Targets normally include M-mode, but fall back to their
+      // first advertised mode for lower-privilege-only profiles.
+      if (riscv_instr_pkg::supported_privileged_mode.size() == 0) begin
+        `uvm_fatal(get_full_name(), "No supported privileged mode is configured")
+      end
+      if (MACHINE_MODE inside {riscv_instr_pkg::supported_privileged_mode}) begin
+        init_privileged_mode = MACHINE_MODE;
+      end else begin
+        init_privileged_mode = riscv_instr_pkg::supported_privileged_mode[0];
+      end
+      init_privileged_mode.rand_mode(0);
+      addr_translaction_rnd_order_c.constraint_mode(0);
+      `uvm_info(get_full_name(), $sformatf(
+                "Random boot mode disabled; using %0s",
+                init_privileged_mode.name()), UVM_LOW)
     end
     `uvm_info(`gfn, $sformatf("riscv_instr_pkg::supported_privileged_mode = %0d",
                    riscv_instr_pkg::supported_privileged_mode.size()), UVM_LOW)
@@ -981,6 +1037,10 @@ class riscv_instr_gen_config extends uvm_object;
     reserved_regs = {tp, sp, scratch_reg};
     // Need to save all loop registers, and RA/T0
     min_stack_len_per_program = 2 * (XLEN/8);
+    // The selected boot mode can change on every randomization.  Rebuild the
+    // invalid-privilege CSR list after that selection so CSR generation uses
+    // the mode of this iteration rather than a constructor-time value.
+    get_invalid_priv_lvl_csr();
     // Check if the setting is legal
     check_setting();
   endfunction

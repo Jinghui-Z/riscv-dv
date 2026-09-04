@@ -92,7 +92,10 @@ class riscv_privileged_common_seq():
         li0_instr = "li x{}, {}".format(cfg.gpr[0], hex(satp.get_val()))
         csrw_instr = "csrw {}, x{} // satp".format(hex(privileged_reg_t.SATP), cfg.gpr[0])
         fld_name = satp.get_field_by_name("PPN")
-        satp_ppn_mask = hex((2**rcs.XLEN) - 1) >> (rcs.XLEN - fld_name.bit_width)
+        # Keep the mask numeric while shifting; converting to ``hex`` first
+        # produces a string and fails whenever random boot selects S/U-mode
+        # with address translation enabled.
+        satp_ppn_mask = ((2**rcs.XLEN) - 1) >> (rcs.XLEN - fld_name.bit_width)
         # Load the root page table physical address
         la_instr = "la x{}, page_table_0".format(cfg.gpr[0])
         # Right shift to get PPN at 4k granularity
@@ -182,7 +185,7 @@ class riscv_privileged_common_seq():
 
     def sie_set_field(self, mode, regs):
         # Enable external and timer interrupt
-        if privileged_reg_t.SIE in rcs.implemeted_csr:
+        if privileged_reg_t.SIE in rcs.implemented_csr:
             self.sie = riscv_privil_reg()
             self.sie.init_reg(privileged_reg_t.SIE)
             if cfg.randomize_csr:

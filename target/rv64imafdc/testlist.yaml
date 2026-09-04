@@ -52,6 +52,7 @@
   gen_opts: >
     +instr_cnt=10000
     +num_of_sub_program=5
+    +enable_random_boot_mode=1
   rtl_test: core_base_test
 
 # TODO: Only enable booting into U-mode for now, as OVPsim doesn't support some debug CSRs

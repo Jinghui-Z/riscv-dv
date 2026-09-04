@@ -28,6 +28,27 @@ class riscv_pmp_cfg extends uvm_object;
   // enable bit for pmp randomization
   bit pmp_randomize = 0;
 
+  // Opt-in generation of a permission fault.  The regular pmp_randomize knob
+  // randomizes the PMP table, but does not guarantee that an instruction will
+  // actually access a denied region.  This knob builds a small executable /
+  // fault-data / remainder layout and emits one access to the denied region.
+  // It is intentionally disabled by default so existing regressions retain
+  // their PMP setup and control flow.
+  bit enable_random_pmp_exception = 1'b0;
+
+  // Set by gen_pmp_exception_setup() and consumed by the assembly generator.
+  // The handler uses the existing PMP exception recovery routine to enable the
+  // missing permission before retrying the faulting instruction.
+  exception_cause_t pmp_exception_fault_type = LOAD_ACCESS_FAULT;
+  bit pmp_exception_active = 1'b0;
+
+  // PMP checks physical addresses, while mtval/mepc contain virtual addresses
+  // when the injected access runs with address translation enabled.  Keep the
+  // translation state local to the opt-in injection path so legacy PMP
+  // exception tests retain their original handler behavior.
+  bit pmp_exception_addr_translation = 1'b0;
+  bit [XLEN - 1 : 0] pmp_exception_phys_offset = 'h8000_0000;
+
   // allow pmp randomization to cause address range overlap
   bit pmp_allow_illegal_tor = 0;
 
@@ -90,6 +111,10 @@ class riscv_pmp_cfg extends uvm_object;
     `uvm_field_int(pmp_num_regions, UVM_DEFAULT)
     `uvm_field_int(pmp_granularity, UVM_DEFAULT)
     `uvm_field_int(pmp_max_offset, UVM_DEFAULT)
+    `uvm_field_int(enable_random_pmp_exception, UVM_DEFAULT)
+    `uvm_field_enum(exception_cause_t, pmp_exception_fault_type, UVM_DEFAULT)
+    `uvm_field_int(pmp_exception_addr_translation, UVM_DEFAULT)
+    `uvm_field_int(pmp_exception_phys_offset, UVM_DEFAULT)
   `uvm_object_utils_end
 
   /////////////////////////////////////////////////
@@ -197,6 +222,7 @@ class riscv_pmp_cfg extends uvm_object;
 
   function new(string name = "");
     string s;
+    string exception_inject_opts;
     super.new(name);
     cfg_per_csr = XLEN / 8;
     inst = uvm_cmdline_processor::get_inst();
@@ -206,11 +232,29 @@ class riscv_pmp_cfg extends uvm_object;
     end
     get_int_arg_value("+pmp_granularity=", pmp_granularity);
     get_bool_arg_value("+pmp_randomize=", pmp_randomize);
+    get_bool_arg_value("+enable_random_pmp_exception=", enable_random_pmp_exception);
+    // Keep a short alias for older/local test lists while documenting the
+    // enable_random_pmp_exception spelling as the canonical option.
+    if (inst.get_arg_value("+pmp_exception_inject=", exception_inject_opts)) begin
+      enable_random_pmp_exception = exception_inject_opts.atobin();
+    end
     get_bool_arg_value("+pmp_allow_illegal_tor=", pmp_allow_illegal_tor);
     get_bool_arg_value("+suppress_pmp_setup=", suppress_pmp_setup);
     get_bool_arg_value("+enable_write_pmp_csr=", enable_write_pmp_csr);
     get_hex_arg_value("+pmp_max_offset=", pmp_max_offset);
     `uvm_info(`gfn, $sformatf("pmp max offset: 0x%08x", pmp_max_offset), UVM_LOW)
+
+    // The injected layout needs three TOR entries: code, denied data, and the
+    // remainder of the image.  Resize the table before allocating pmp_cfg so
+    // +enable_random_pmp_exception=1 works with the historical one-entry
+    // default as well as with explicitly randomized PMP tables.
+    if (enable_random_pmp_exception && (pmp_num_regions < 3)) begin
+      `uvm_info(`gfn, $sformatf(
+                "PMP exception injection requires at least 3 regions; using %0d",
+                3), UVM_LOW)
+      pmp_num_regions = 3;
+      pmp_num_regions.rand_mode(0);
+    end
     pmp_cfg = new[pmp_num_regions];
     pmp_cfg_addr_valid = new[pmp_num_regions];
     pmp_cfg_already_configured = new[pmp_num_regions];
@@ -370,6 +414,24 @@ class riscv_pmp_cfg extends uvm_object;
     endcase
   endfunction
 
+  // Return the implemented configuration CSR address for a PMP entry.
+  //
+  // PMP configuration bytes are packed four-per-CSR on RV32 and eight-per-
+  // CSR on RV64.  Unlike the address CSRs, however, the configuration CSR
+  // bank is not linearly numbered on RV64: pmpcfg0 contains entries 0..7,
+  // pmpcfg2 contains entries 8..15, pmpcfg4 contains entries 16..23, etc.
+  // The odd-numbered addresses (pmpcfg1, pmpcfg3, ...) are reserved.  Keep
+  // this mapping in one helper so setup, write tests and the exception
+  // recovery routine cannot accidentally emit a reserved CSR access.
+  function automatic int pmpcfg_csr_addr_for_region(int region_idx);
+    int csr_bank;
+    csr_bank = region_idx / cfg_per_csr;
+    if (XLEN == 64) begin
+      return base_pmpcfg_addr + (csr_bank * 2);
+    end
+    return base_pmpcfg_addr + csr_bank;
+  endfunction
+
   // TODO(udinator) - implement function to return hardware masked pmpaddr "representation"
   function bit [XLEN - 1 : 0] convert_addr2pmp(bit [XLEN - 1 : 0] addr);
     `uvm_info(`gfn, "Placeholder function, need to implement", UVM_LOW)
@@ -382,6 +444,184 @@ class riscv_pmp_cfg extends uvm_object;
     instr.push_back($sformatf("li x%0d, 0x1fffffff", scratch_reg));
     instr.push_back($sformatf("csrw 0x%0x, x%0d", PMPADDR0, scratch_reg));
     instr.push_back($sformatf("csrw 0x%0x, 0x1f", PMPCFG0));
+  endfunction
+
+  // Generate an opt-in PMP permission-fault setup.  Three TOR entries are
+  // used so that the instruction image remains executable while the first
+  // user data page is isolated:
+  //
+  //   entry 0: [0, fault_data_start)       RWX
+  //   entry 1: [fault_data_start, +size)   R-only or W-only
+  //   entry 2: [fault_data_end, max PA)    RWX
+  //
+  // The missing permission is selected per generated test.  The generated
+  // access is emitted separately by gen_pmp_exception_access(), after the
+  // privilege-mode switch, and the existing PMP trap handler enables that
+  // permission before retrying the access.  Keeping this path separate from
+  // gen_pmp_instr() leaves all legacy PMP command-line configurations intact
+  // when the feature is disabled.
+  function void gen_pmp_exception_setup(riscv_reg_t scratch_reg[2],
+                                        string fault_label,
+                                        int fault_region_size,
+                                        ref string instr[$],
+                                        input bit addr_translation_on = 1'b0,
+                                        input bit [XLEN - 1 : 0] phys_offset = 'h8000_0000);
+    bit [7:0] code_cfg;
+    bit [7:0] fault_cfg;
+    bit [7:0] tail_cfg;
+    bit [XLEN - 1 : 0] pmp_word;
+
+    pmp_exception_active = 1'b0;
+    pmp_exception_addr_translation = 1'b0;
+    pmp_exception_phys_offset = phys_offset;
+    if (!enable_random_pmp_exception) begin
+      return;
+    end
+    if (pmp_num_regions < 3) begin
+      `uvm_warning(`gfn, $sformatf(
+                   "PMP exception injection needs 3 regions, got %0d; disabling injection",
+                   pmp_num_regions))
+      return;
+    end
+    if ((fault_label == "") || (fault_region_size < 4) || ((fault_region_size % 4) != 0)) begin
+      `uvm_warning(`gfn, $sformatf(
+                   "Invalid PMP fault data region (%0s, size %0d); disabling injection",
+                   fault_label, fault_region_size))
+      return;
+    end
+    pmp_exception_addr_translation = addr_translation_on;
+
+    // A load fault and a store fault exercise independent permission bits.  X
+    // is deliberately not selected here because executing arbitrary data
+    // bytes after the handler repairs X would make the generated test depend
+    // on the data pattern rather than on PMP behavior.
+    if ($urandom_range(1, 0) == 0) begin
+      pmp_exception_fault_type = LOAD_ACCESS_FAULT;
+      // TOR, X=0, W=0, R=0: deny reads while keeping the permission
+      // combination legal when ePMP MML is disabled.
+      fault_cfg = 8'h08;
+    end else begin
+      pmp_exception_fault_type = STORE_AMO_ACCESS_FAULT;
+      // TOR, X=0, W=0, R=1.
+      fault_cfg = 8'h09;
+    end
+    code_cfg = 8'h0f; // TOR, RWX
+    tail_cfg = 8'h0f; // TOR, RWX
+    pmp_exception_active = 1'b1;
+
+    // Keep the software-visible model in sync with the generated CSR writes.
+    // The exception handler reads the hardware CSRs, but these fields are
+    // useful to target extensions and to debug output.
+    foreach (pmp_cfg[i]) begin
+      pmp_cfg[i].l = 1'b0;
+      pmp_cfg[i].a = OFF;
+      pmp_cfg[i].x = 1'b0;
+      pmp_cfg[i].w = 1'b0;
+      pmp_cfg[i].r = 1'b0;
+      pmp_cfg[i].offset = 0;
+      pmp_cfg_addr_valid[i] = 1'b0;
+      pmp_cfg_already_configured[i] = 1'b0;
+    end
+    pmp_cfg[0].a = TOR;
+    pmp_cfg[0].x = 1'b1;
+    pmp_cfg[0].w = 1'b1;
+    pmp_cfg[0].r = 1'b1;
+    pmp_cfg[1].a = TOR;
+    pmp_cfg[1].x = 1'b0;
+    // Keep W=0/R=0 for a load fault and W=0/R=1 for a store fault.  The
+    // former is the legal read-denied combination; W=1/R=0 is reserved.
+    pmp_cfg[1].w = 1'b0;
+    pmp_cfg[1].r = (pmp_exception_fault_type == STORE_AMO_ACCESS_FAULT);
+    pmp_cfg[2].a = TOR;
+    pmp_cfg[2].x = 1'b1;
+    pmp_cfg[2].w = 1'b1;
+    pmp_cfg[2].r = 1'b1;
+
+    instr.push_back($sformatf("# random PMP %0s permission fault",
+                              (pmp_exception_fault_type == LOAD_ACCESS_FAULT) ?
+                              "load" : "store"));
+    // pmpaddr0 is the upper bound of the executable prefix.
+    instr.push_back($sformatf("la x%0d, %0s", scratch_reg[0], fault_label));
+    instr.push_back($sformatf("srli x%0d, x%0d, 2", scratch_reg[0], scratch_reg[0]));
+    instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmp_addr, scratch_reg[0]));
+    // pmpaddr1 is the end of the denied data region.
+    instr.push_back($sformatf("la x%0d, %0s", scratch_reg[0], fault_label));
+    instr.push_back($sformatf("li x%0d, %0d", scratch_reg[1], fault_region_size));
+    instr.push_back($sformatf("add x%0d, x%0d, x%0d", scratch_reg[0], scratch_reg[0],
+                              scratch_reg[1]));
+    instr.push_back($sformatf("srli x%0d, x%0d, 2", scratch_reg[0], scratch_reg[0]));
+    instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmp_addr + 1, scratch_reg[0]));
+    // pmpaddr2 covers every remaining implemented physical address, including
+    // an external signature/MMIO address that may live above the ELF image.
+    instr.push_back($sformatf("li x%0d, -1", scratch_reg[0]));
+    instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmp_addr + 2, scratch_reg[0]));
+
+    // All three injected entries live in pmpcfg0.  Do not derive additional
+    // CSR addresses from a linear increment here: on RV64 pmpcfg1, pmpcfg3,
+    // ... are reserved (the next implemented CSR is pmpcfg2).  Higher PMP
+    // entries are left untouched because the first three TOR entries cover
+    // the complete image and the fault is resolved by entry 1.
+    pmp_word = '0;
+    // Assign individual bytes instead of shifting 8-bit expressions;
+    // otherwise a simulator may truncate the shift before widening it to
+    // the XLEN-sized CSR value.
+    pmp_word[7:0] = code_cfg;
+    pmp_word[15:8] = fault_cfg;
+    pmp_word[23:16] = tail_cfg;
+    instr.push_back($sformatf("li x%0d, 0x%0x", scratch_reg[0], pmp_word));
+    instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmpcfg_addr, scratch_reg[0]));
+    `uvm_info(`gfn, $sformatf("Random PMP permission fault: type=%0s data=%0s size=%0d",
+                              (pmp_exception_fault_type == LOAD_ACCESS_FAULT) ? "load" : "store",
+                              fault_label, fault_region_size), UVM_LOW)
+  endfunction
+
+  // Emit the access that intentionally violates the permission selected by
+  // gen_pmp_exception_setup().  The caller adds the continuation jump; after
+  // the existing handler repairs pmpcfg, mret retries this exact instruction
+  // and execution proceeds normally.
+  function void gen_pmp_exception_access(riscv_reg_t addr_reg,
+                                          riscv_reg_t data_reg,
+                                          riscv_reg_t status_reg,
+                                          string fault_label,
+                                          ref string instr[$],
+                                          input bit use_mprv = 1'b0,
+                                          input privileged_mode_t mprv_mode = USER_MODE);
+    bit [XLEN - 1 : 0] mstatus_set;
+    if (!pmp_exception_active) return;
+    instr.push_back($sformatf("# retry after random PMP permission fault"));
+    if (use_mprv) begin
+      if (mprv_mode == MACHINE_MODE || mprv_mode == RESERVED_MODE) begin
+        `uvm_fatal(`gfn, "M-mode PMP exception injection needs a lower MPRV privilege")
+      end
+      mstatus_set = '0;
+      mstatus_set[17] = 1'b1;
+      mstatus_set[12:11] = mprv_mode;
+      // Save the complete status value across the trap, then make just this
+      // data access use lower-privilege PMP semantics. The trap prologue saves
+      // all GPRs, so status_reg survives until the faulting instruction retries.
+      instr.push_back($sformatf("csrr x%0d, 0x%0x", status_reg, MSTATUS));
+      instr.push_back($sformatf("li x%0d, 0x%0x", addr_reg,
+                                MPRV_BIT_MASK | MPP_BIT_MASK));
+      instr.push_back($sformatf("csrc 0x%0x, x%0d", MSTATUS, addr_reg));
+      instr.push_back($sformatf("li x%0d, 0x%0x", addr_reg, mstatus_set));
+      instr.push_back($sformatf("csrs 0x%0x, x%0d", MSTATUS, addr_reg));
+    end
+    instr.push_back($sformatf("la x%0d, %0s", addr_reg, fault_label));
+    case (pmp_exception_fault_type)
+      LOAD_ACCESS_FAULT: begin
+        instr.push_back($sformatf("lw x%0d, 0(x%0d)", data_reg, addr_reg));
+      end
+      STORE_AMO_ACCESS_FAULT: begin
+        instr.push_back($sformatf("li x%0d, 0", data_reg));
+        instr.push_back($sformatf("sw x%0d, 0(x%0d)", data_reg, addr_reg));
+      end
+      default: begin
+        `uvm_fatal(`gfn, "Invalid random PMP exception type")
+      end
+    endcase
+    if (use_mprv) begin
+      instr.push_back($sformatf("csrw 0x%0x, x%0d", MSTATUS, status_reg));
+    end
   endfunction
 
   // This function parses the pmp_cfg[] array to generate the actual instructions to set up
@@ -498,15 +738,17 @@ class riscv_pmp_cfg extends uvm_object;
           cfg_bitmask = 0;
           instr.push_back($sformatf("li x%0d, 0x%0x", scratch_reg[0], cfg_bitmask));
           for (int i = 0; i < (code_entry / cfg_per_csr); i++) begin
-            instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmpcfg_addr + i, scratch_reg[0]));
+            instr.push_back($sformatf("csrw 0x%0x, x%0d",
+                                      pmpcfg_csr_addr_for_region(i * cfg_per_csr),
+                                      scratch_reg[0]));
           end
         end
         // Enable the selected config on region code_entry.
         cfg_bitmask = cfg_byte << ((code_entry % cfg_per_csr) * 8);
         `uvm_info(`gfn, $sformatf("temporary code config: 0x%08x", cfg_bitmask), UVM_DEBUG)
         instr.push_back($sformatf("li x%0d, 0x%0x", scratch_reg[0], cfg_bitmask));
-        instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmpcfg_addr + (code_entry/cfg_per_csr),
-                                  scratch_reg[0]));
+        instr.push_back($sformatf("csrw 0x%0x, x%0d",
+                                  pmpcfg_csr_addr_for_region(code_entry), scratch_reg[0]));
 
         // Load the address of the kernel_stack_end into PMP stack entry.
         instr.push_back($sformatf("la x%0d, kernel_stack_end", scratch_reg[0]));
@@ -577,7 +819,7 @@ class riscv_pmp_cfg extends uvm_object;
     end
 
     foreach (pmp_cfg[i]) begin
-      pmp_id = i / cfg_per_csr;
+      pmp_id = pmpcfg_csr_addr_for_region(i);
       cfg_byte = {pmp_cfg[i].l, pmp_cfg[i].zero, pmp_cfg[i].a,
                   pmp_cfg[i].x, pmp_cfg[i].w,    pmp_cfg[i].r};
       `uvm_info(`gfn, $sformatf("cfg_byte: 0x%02x", cfg_byte), UVM_LOW)
@@ -622,12 +864,12 @@ class riscv_pmp_cfg extends uvm_object;
       // Short circuit if we reach the end of the list.
       if (i == pmp_cfg.size() - 1) begin
         instr.push_back($sformatf("li x%0d, 0x%0x", scratch_reg[0], pmp_word));
-        instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmpcfg_addr + pmp_id, scratch_reg[0]));
+        instr.push_back($sformatf("csrw 0x%0x, x%0d", pmp_id, scratch_reg[0]));
         break;
       end else if ((i + 1) % cfg_per_csr == 0) begin
         // If we've filled up pmp_word, write to the corresponding CSR.
         instr.push_back($sformatf("li x%0d, 0x%0x", scratch_reg[0], pmp_word));
-        instr.push_back($sformatf("csrw 0x%0x, x%0d", base_pmpcfg_addr + pmp_id, scratch_reg[0]));
+        instr.push_back($sformatf("csrw 0x%0x, x%0d", pmp_id, scratch_reg[0]));
         pmp_word = 0;
       end
     end
@@ -680,7 +922,7 @@ class riscv_pmp_cfg extends uvm_object;
     // value within [0 : pmp_num_regions] to manually check which PMP CSRs to read from
     for (int i = 1; i < pmp_num_regions + 1; i++) begin
       int pmpaddr_addr = base_pmp_addr + i;
-      int pmpcfg_addr = base_pmpcfg_addr + (i / cfg_per_csr);
+      int pmpcfg_addr = pmpcfg_csr_addr_for_region(i);
       instr.push_back($sformatf("li x%0d, %0d", scratch_reg[4], i-1));
       instr.push_back($sformatf("beq x%0d, x%0d, %0df", scratch_reg[0], scratch_reg[4], i));
     end
@@ -689,9 +931,14 @@ class riscv_pmp_cfg extends uvm_object;
     // read from the pmpaddr and pmpcfg CSRs
     for (int i = 1; i < pmp_num_regions + 1; i++) begin
       int pmpaddr_addr = base_pmp_addr + i;
-      int pmpcfg_addr = base_pmpcfg_addr + (i / cfg_per_csr);
+      int pmpcfg_addr = pmpcfg_csr_addr_for_region(i);
       instr.push_back($sformatf("%0d: csrr x%0d, 0x%0x", i, scratch_reg[1], base_pmp_addr + i - 1));
-      instr.push_back($sformatf("csrr x%0d, 0x%0x", scratch_reg[2], base_pmpcfg_addr + ((i-1)/4)));
+      // RV32 packs four configuration bytes per pmpcfg CSR, while RV64
+      // packs eight.  Use the computed XLEN-dependent value instead of the
+      // historical RV32-only literal so entries 4..7 are read from the right
+      // CSR on RV64.
+      instr.push_back($sformatf("csrr x%0d, 0x%0x", scratch_reg[2],
+                                pmpcfg_csr_addr_for_region(i - 1)));
       instr.push_back("j 17f");
     end
 
@@ -805,7 +1052,18 @@ class riscv_pmp_cfg extends uvm_object;
     // Sub-section to handle address matching mode TOR.
     instr = {instr,
              $sformatf("21: mv x%0d, x%0d", scratch_reg[0], scratch_reg[6]),
-             $sformatf("csrr x%0d, 0x%0x", scratch_reg[4], MTVAL),
+             $sformatf("csrr x%0d, 0x%0x", scratch_reg[4], MTVAL)
+            };
+    if (pmp_exception_addr_translation) begin
+      // mtval is virtual for the injected lower-privilege access. Convert it
+      // to the physical address used by PMP before matching a region.
+      instr = {instr,
+               $sformatf("li x%0d, 0x%0x", scratch_reg[0], pmp_exception_phys_offset),
+               $sformatf("add x%0d, x%0d, x%0d", scratch_reg[4], scratch_reg[4], scratch_reg[0]),
+               $sformatf("mv x%0d, x%0d", scratch_reg[0], scratch_reg[6])
+              };
+    end
+    instr = {instr,
              $sformatf("srli x%0d, x%0d, 2", scratch_reg[4], scratch_reg[4]),
              // If loop_counter==0, compare fault_addr to 0
              $sformatf("bnez x%0d, 22f", scratch_reg[0]),
@@ -822,7 +1080,15 @@ class riscv_pmp_cfg extends uvm_object;
     // Sub-section to handle address matching mode NA4.
     // TODO(udinator) : add rv64 support
     instr = {instr,
-             $sformatf("24: csrr x%0d, 0x%0x", scratch_reg[0], MTVAL),
+             $sformatf("24: csrr x%0d, 0x%0x", scratch_reg[0], MTVAL)
+            };
+    if (pmp_exception_addr_translation) begin
+      instr = {instr,
+               $sformatf("li x%0d, 0x%0x", scratch_reg[4], pmp_exception_phys_offset),
+               $sformatf("add x%0d, x%0d, x%0d", scratch_reg[0], scratch_reg[0], scratch_reg[4])
+              };
+    end
+    instr = {instr,
              $sformatf("srli x%0d, x%0d, 2", scratch_reg[0], scratch_reg[0]),
              // Zero out pmpaddr[i][31:30]
              $sformatf("slli x%0d, x%0d, 2", scratch_reg[4], scratch_reg[1]),
@@ -835,7 +1101,15 @@ class riscv_pmp_cfg extends uvm_object;
 
     // Sub-section to handle address matching mode NAPOT.
     instr = {instr,
-             $sformatf("25: csrr x%0d, 0x%0x", scratch_reg[0], MTVAL),
+             $sformatf("25: csrr x%0d, 0x%0x", scratch_reg[0], MTVAL)
+            };
+    if (pmp_exception_addr_translation) begin
+      instr = {instr,
+               $sformatf("li x%0d, 0x%0x", scratch_reg[4], pmp_exception_phys_offset),
+               $sformatf("add x%0d, x%0d, x%0d", scratch_reg[0], scratch_reg[0], scratch_reg[4])
+              };
+    end
+    instr = {instr,
              // get fault_addr[31:2]
              $sformatf("srli x%0d, x%0d, 2", scratch_reg[0], scratch_reg[0]),
              // mask the bottom pmp_granularity bits of fault_addr
@@ -891,7 +1165,17 @@ class riscv_pmp_cfg extends uvm_object;
         instr = {instr,
                  // If MML or locked try to load the instruction and see if it is compressed so
                  // the MEPC can be advanced appropriately.
-                 $sformatf("27: csrr x%0d, 0x%0x", scratch_reg[0], MEPC),
+                 $sformatf("27: csrr x%0d, 0x%0x", scratch_reg[0], MEPC)
+                };
+        if (pmp_exception_addr_translation) begin
+          // M-mode instruction loads bypass satp unless MPRV is set. Convert
+          // the lower-privilege virtual mepc to its identity-offset PA.
+          instr = {instr,
+                   $sformatf("li x%0d, 0x%0x", scratch_reg[4], pmp_exception_phys_offset),
+                   $sformatf("add x%0d, x%0d, x%0d", scratch_reg[0], scratch_reg[0], scratch_reg[4])
+                  };
+        end
+        instr = {instr,
                  // This might cause a load access fault, which we much handle in the load trap
                  // handler.
                  $sformatf("lw x%0d, 0(x%0d)", scratch_reg[0], scratch_reg[0]),
@@ -920,7 +1204,17 @@ class riscv_pmp_cfg extends uvm_object;
         instr = {instr,
                  // If MML or locked try to load the instruction and see if it is compressed so
                  // the MEPC can be advanced appropriately.
-                 $sformatf("27: csrr x%0d, 0x%0x", scratch_reg[0], MEPC),
+                 $sformatf("27: csrr x%0d, 0x%0x", scratch_reg[0], MEPC)
+                };
+        if (pmp_exception_addr_translation) begin
+          // Compare and dereference the physical address. The main label is
+          // already a PA because this handler executes in M-mode.
+          instr = {instr,
+                   $sformatf("li x%0d, 0x%0x", scratch_reg[4], pmp_exception_phys_offset),
+                   $sformatf("add x%0d, x%0d, x%0d", scratch_reg[0], scratch_reg[0], scratch_reg[4])
+                  };
+        end
+        instr = {instr,
                  // We must first check whether the access fault was in the trap handler in case
                  // we previously tried to load an instruction in a PMP entry that did not have
                  // read permissions.
@@ -990,13 +1284,17 @@ class riscv_pmp_cfg extends uvm_object;
              $sformatf("beq x%0d, x%0d, 32f", scratch_reg[0], scratch_reg[4]),
              $sformatf("li x%0d, 3", scratch_reg[4]),
              $sformatf("beq x%0d, x%0d, 33f", scratch_reg[0], scratch_reg[4]),
-             $sformatf("30: csrw 0x%0x, x%0d", PMPCFG0, scratch_reg[2]),
+             $sformatf("30: csrw 0x%0x, x%0d",
+                       pmpcfg_csr_addr_for_region(0), scratch_reg[2]),
              $sformatf("j 34f"),
-             $sformatf("31: csrw 0x%0x, x%0d", PMPCFG1, scratch_reg[2]),
+             $sformatf("31: csrw 0x%0x, x%0d",
+                       pmpcfg_csr_addr_for_region(cfg_per_csr), scratch_reg[2]),
              $sformatf("j 34f"),
-             $sformatf("32: csrw 0x%0x, x%0d", PMPCFG2, scratch_reg[2]),
+             $sformatf("32: csrw 0x%0x, x%0d",
+                       pmpcfg_csr_addr_for_region(2 * cfg_per_csr), scratch_reg[2]),
              $sformatf("j 34f"),
-             $sformatf("33: csrw 0x%0x, x%0d", PMPCFG3, scratch_reg[2]),
+             $sformatf("33: csrw 0x%0x, x%0d",
+                       pmpcfg_csr_addr_for_region(3 * cfg_per_csr), scratch_reg[2]),
              // End the pmp handler with a labeled nop instruction, this provides a branch target
              // for the internal routine after it has "fixed" the pmp configuration CSR.
              $sformatf("34: nop")
@@ -1014,7 +1312,7 @@ class riscv_pmp_cfg extends uvm_object;
     bit [XLEN-1:0] pmp_val;
     for (int i = 0; i < pmp_num_regions; i++) begin
       pmp_addr = base_pmp_addr + i;
-      pmpcfg_addr = base_pmpcfg_addr + (i / cfg_per_csr);
+      pmpcfg_addr = pmpcfg_csr_addr_for_region(i);
       // We randomize the lower 31 bits of pmp_val and then add this to the
       // address of <main>, guaranteeing that the random value written to
       // pmpaddr[i] doesn't interfere with the safe region.

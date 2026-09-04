@@ -28,7 +28,9 @@ from pygen_src.riscv_signature_pkg import (signature_type_t, core_status_t,
 from pygen_src.riscv_instr_gen_config import cfg
 from pygen_src.riscv_data_page_gen import riscv_data_page_gen
 from pygen_src.riscv_privileged_common_seq import riscv_privileged_common_seq
-from pygen_src.riscv_utils import factory
+from pygen_src.riscv_utils import (factory, is_directed_instr_stream_supported,
+                                    is_random_directed_instr_stream_supported,
+                                    get_random_directed_instr_stream_names)
 rcs = import_module("pygen_src.target." + cfg.argv.target + ".riscv_core_setting")
 
 
@@ -229,7 +231,11 @@ class riscv_asm_program_gen:
                       sub_program_name, num_sub_program):
         if num_sub_program != 0:
             callstack_gen = riscv_callstack_gen()
-            self.callstack_gen.init(num_sub_program + 1)
+            # Keep the locally-created generator as the source of the
+            # randomized call graph.  The Python backend never initialized a
+            # self.callstack_gen member, so sub-program generation failed
+            # before any call edges could be emitted.
+            callstack_gen.init(num_sub_program + 1)
             if callstack_gen.randomize():
                 idx = 0
                 # Insert the jump instruction based on the call stack
@@ -603,8 +609,8 @@ class riscv_asm_program_gen:
 
     def gen_privileged_mode_switch_routine(self, hart):
         privil_seq = riscv_privileged_common_seq()
+        instr = []
         for privil_mode in rcs.supported_privileged_mode:
-            instr = []
             # csr_handshake = []
             if privil_mode != cfg.init_privileged_mode:
                 continue
@@ -617,6 +623,11 @@ class riscv_asm_program_gen:
             if cfg.require_signature_addr:
                 # TODO
                 pass
+            # Only one boot mode is selected.  Do not let a subsequent
+            # non-matching mode iteration clear the generated instructions
+            # (the supported mode list is ordered U/S/M, so this used to drop
+            # all S/U setup while M-mode happened to work).
+            break
         self.instr_stream.extend(instr)
 
     # Setup EPC before entering target privileged mode
@@ -688,6 +699,13 @@ class riscv_asm_program_gen:
     def trap_vector_init(self, hart):
         instr = []
         for mode in rcs.supported_privileged_mode:
+            # pyflow currently has a single machine-mode trap dispatch path;
+            # delegation and per-S/U handlers are not implemented.  Keep the
+            # lower-mode vectors untouched so S/U boot programs do not refer
+            # to undefined stvec_handler/utvec_handler symbols.  Traps from
+            # those modes are routed to MTVEC while delegation is disabled.
+            if mode != privileged_mode_t.MACHINE_MODE:
+                continue
             if mode == privileged_mode_t.MACHINE_MODE:
                 trap_vec_reg = privileged_reg_t.MTVEC
             elif mode == privileged_mode_t.SUPERVISOR_MODE:
@@ -754,7 +772,10 @@ class riscv_asm_program_gen:
         self.gen_section(pkg_ins.get_label("pt_fault_handler", hart), instr)
 
     def gen_trap_handlers(self, hart):
-        # TODO
+        # pyflow's delegation and S/U trap handlers are still TODO.  Keep one
+        # machine-mode dispatch path, which is also where traps from an S/U
+        # boot land while delegation is disabled.  trap_vector_init() only
+        # programs MTVEC for the same reason.
         self.gen_trap_handler_section(hart, "m", privileged_reg_t.MCAUSE,
                                       privileged_reg_t.MTVEC, privileged_reg_t.MTVAL,
                                       privileged_reg_t.MEPC, privileged_reg_t.MSCRATCH,
@@ -812,8 +833,18 @@ class riscv_asm_program_gen:
         # TODO
         instr.extend(("csrr x{}, {} # {}".format(cfg.gpr[0], hex(epc), epc.name),
                       "csrr x{}, {} # {}".format(cfg.gpr[0], hex(cause), cause.name),
-                      # Check if it's an ECALL exception. Jump to ECALL exception handler
-                      # TODO ECALL_SMODE, ECALL_UMODE
+                      # Check all ECALL privilege causes.  A trap dispatched
+                      # through STVEC/UTVEC must terminate via the same
+                      # ecall handler as an M-mode ECALL; otherwise the
+                      # fallback below re-enters test_done indefinitely.
+                      "li x{}, {} # ECALL_UMODE".format(cfg.gpr[1],
+                                                        hex(exception_cause_t.ECALL_UMODE)),
+                      "beq x{}, x{}, {}ecall_handler".format(
+                      cfg.gpr[0], cfg.gpr[1], pkg_ins.hart_prefix(hart)),
+                      "li x{}, {} # ECALL_SMODE".format(cfg.gpr[1],
+                                                        hex(exception_cause_t.ECALL_SMODE)),
+                      "beq x{}, x{}, {}ecall_handler".format(
+                      cfg.gpr[0], cfg.gpr[1], pkg_ins.hart_prefix(hart)),
                       "li x{}, {} # ECALL_MMODE".format(cfg.gpr[1],
                                                         hex(exception_cause_t.ECALL_MMODE)),
                       "beq x{}, x{}, {}ecall_handler".format(
@@ -1152,6 +1183,116 @@ class riscv_asm_program_gen:
         instr_insert_cnt = 0
         idx = 0
         if cfg.no_directed_instr:
+            return
+        if cfg.enable_random_directed_instr:
+            # The configured directed stream ratios are used as selection
+            # weights.  The overall insertion density is controlled by the
+            # dedicated random_directed_instr_ratio option.
+            configured_candidates = []
+            malformed_candidates = []
+            for name, raw_weight in self.directed_instr_stream_ratio.items():
+                try:
+                    weight = int(raw_weight)
+                except (TypeError, ValueError):
+                    malformed_candidates.append(name)
+                    continue
+                if weight > 0:
+                    configured_candidates.append((name, weight))
+            if malformed_candidates:
+                logging.warning(
+                    "Skipping directed streams with invalid random-injection weights: %s",
+                    ", ".join(sorted(malformed_candidates)))
+            # The SV and Python backends intentionally share testlists, but
+            # not every SV stream has a Python implementation.  Filter those
+            # names before weighted selection so one unsupported candidate
+            # cannot abort an otherwise valid pyflow generation.
+            unsupported_candidates = [name for name, _ in configured_candidates
+                                      if not is_random_directed_instr_stream_supported(name)]
+            if unsupported_candidates:
+                logging.warning(
+                    "Skipping directed streams unavailable or unsafe for pyflow random injection: %s",
+                    ", ".join(sorted(unsupported_candidates)))
+            candidates = [(name, weight) for name, weight in configured_candidates
+                          if is_random_directed_instr_stream_supported(name)]
+            if not candidates:
+                if configured_candidates:
+                    logging.warning(
+                        "Random directed instruction injection has no safe pyflow candidates; skipping: %s",
+                        ", ".join(sorted(name for name, _ in configured_candidates)))
+                    return
+                candidates = [(name, 1)
+                              for name in get_random_directed_instr_stream_names()]
+                if not candidates:
+                    logging.critical(
+                        "No random directed instruction stream is available in pyflow")
+                    raise RuntimeError(
+                        "No random directed instruction stream is available in pyflow")
+            if cfg.random_directed_instr_ratio == 0:
+                return
+            logging.info("Random directed instruction candidates: %s",
+                         ", ".join(name for name, _ in candidates))
+            instr_insert_cnt = int(original_instr_cnt *
+                                   cfg.random_directed_instr_ratio // 1000)
+            if instr_insert_cnt < min_insert_cnt:
+                instr_insert_cnt = min_insert_cnt
+            logging.info("Randomly insert %d directed instr streams into %s at ratio %d/1000",
+                         instr_insert_cnt, label, cfg.random_directed_instr_ratio)
+            inserted_count = 0
+            for i in range(instr_insert_cnt):
+                # A stream can be present in the factory yet still fail when
+                # randomized for a particular ISA/configuration.  Remove a
+                # failing candidate from this invocation instead of aborting
+                # the whole test; this also protects shared SV/PyFlow
+                # testlists from backend-specific implementation gaps.
+                while candidates:
+                    names = [name for name, _ in candidates]
+                    weights = [weight for _, weight in candidates]
+                    instr_stream_name = random.choices(names, weights=weights, k=1)[0]
+                    name = "{}_{}".format(instr_stream_name, i)
+                    try:
+                        object_h = factory(instr_stream_name)
+                        if object_h is None:
+                            raise RuntimeError("factory returned None")
+                        new_instr_stream = copy.deepcopy(object_h)
+                        if new_instr_stream is None:
+                            raise RuntimeError("deepcopy returned None")
+                        new_instr_stream.name = name
+                        new_instr_stream.hart = hart
+                        new_instr_stream.label = "{}_{}".format(label, idx)
+                        new_instr_stream.kernel_mode = kernel_mode
+                        # A randomly injected stream is embedded in an
+                        # existing program (and, for PyFlow sub-programs, is
+                        # not protected by the optional stack prologue).  Ask
+                        # streams that support the flag to preserve live
+                        # runtime registers.
+                        new_instr_stream.preserve_runtime_regs = 1
+                        randomize_result = new_instr_stream.randomize()
+                        if randomize_result is False:
+                            raise RuntimeError("randomize() returned False")
+                        if not getattr(new_instr_stream, "instr_list", None):
+                            raise RuntimeError("randomized stream is empty")
+                        if any(instr is None for instr in new_instr_stream.instr_list):
+                            raise RuntimeError("randomized stream contains empty instructions")
+                    except (Exception, SystemExit) as exc:
+                        logging.warning(
+                            "Skipping unusable pyflow directed stream %s during random injection: %s",
+                            instr_stream_name, exc)
+                        candidates = [(candidate_name, candidate_weight)
+                                      for candidate_name, candidate_weight in candidates
+                                      if candidate_name != instr_stream_name]
+                        continue
+                    instr_stream.append(new_instr_stream)
+                    logging.info("Selected random directed instruction stream: %s",
+                                 instr_stream_name)
+                    idx += 1
+                    inserted_count += 1
+                    break
+                if not candidates:
+                    logging.warning(
+                        "No usable pyflow directed streams remain; inserted %d/%d requested streams",
+                        inserted_count, instr_insert_cnt)
+                    break
+            random.shuffle(instr_stream)
             return
         for instr_stream_name in self.directed_instr_stream_ratio:
             instr_insert_cnt = int(original_instr_cnt *

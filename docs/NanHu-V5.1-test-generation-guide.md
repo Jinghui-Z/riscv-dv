@@ -6,6 +6,7 @@
 - [`target/nanhu_v5_1/riscv_core_setting.sv`](../target/nanhu_v5_1/riscv_core_setting.sv)：架构、CSR、特权级和地址翻译模式配置。
 - [`target/nanhu_v5_1/testlist.yaml`](../target/nanhu_v5_1/testlist.yaml)：NanHu 用例清单及每项生成参数。
 - [`docs/NanHu-V5.1-riscv-dv-gap-analysis.md`](NanHu-V5.1-riscv-dv-gap-analysis.md)：规格覆盖范围、实现边界和已知风险。
+- [`docs/random-generation-features.md`](random-generation-features.md)：随机 directed stream、随机 boot mode 和 PMP 权限异常注入说明。
 
 文中的命令均从 riscv-dv 仓库根目录执行。
 

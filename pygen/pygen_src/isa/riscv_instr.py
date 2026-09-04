@@ -21,7 +21,8 @@ from bitstring import BitArray
 from importlib import import_module
 from pygen_src.riscv_instr_pkg import (pkg_ins, riscv_instr_category_t, riscv_reg_t,
                                        riscv_instr_name_t, riscv_instr_format_t,
-                                       riscv_instr_group_t, imm_t)
+                                       riscv_instr_group_t, privileged_mode_t,
+                                       privileged_reg_t, imm_t)
 from pygen_src.riscv_instr_gen_config import cfg
 rcs = import_module("pygen_src.target." + cfg.argv.target + ".riscv_core_setting")
 reload(logging)
@@ -184,42 +185,103 @@ class riscv_instr:
     def is_supported(self, cfg):
         return 1
 
+    @staticmethod
+    def _flatten(items):
+        """Flatten category/CSR lists without mutating their owners."""
+        flattened = []
+        for item in items or []:
+            if isinstance(item, (list, tuple)):
+                flattened.extend(riscv_instr._flatten(item))
+            else:
+                flattened.append(item)
+        return flattened
+
     @classmethod
     def build_basic_instruction_list(cls, cfg):
-        cls.basic_instr = (cls.instr_category["SHIFT"] + cls.instr_category["ARITHMETIC"] +
-                           cls.instr_category["LOGICAL"] + cls.instr_category["COMPARE"])
+        cls.basic_instr = cls._flatten((cls.instr_category["SHIFT"],
+                                       cls.instr_category["ARITHMETIC"],
+                                       cls.instr_category["LOGICAL"],
+                                       cls.instr_category["COMPARE"]))
         if cfg.no_ebreak == 0:
-            cls.basic_instr.append("EBREAK")
+            cls.basic_instr.append(riscv_instr_name_t.EBREAK)
             for _ in rcs.supported_isa:
                 if(riscv_instr_group_t.RV32C in rcs.supported_isa and
                    not(cfg.disable_compressed_instr)):
-                    cls.basic_instr.append("C_EBREAK")
+                    cls.basic_instr.append(riscv_instr_name_t.C_EBREAK)
                     break
         if cfg.no_dret == 0:
-            cls.basic_instr.append("DRET")
+            cls.basic_instr.append(riscv_instr_name_t.DRET)
         if cfg.no_fence == 0:
-            cls.basic_instr.append(cls.instr_category["SYNCH"])
-        if(cfg.no_csr_instr == 0 and cfg.init_privileged_mode == "MACHINE_MODE"):
-            cls.basic_instr.append(cls.instr_category["CSR"])
+            cls.basic_instr.extend(cls._flatten(cls.instr_category["SYNCH"]))
+        if(cfg.no_csr_instr == 0 and
+           cfg.init_privileged_mode == privileged_mode_t.MACHINE_MODE):
+            cls.basic_instr.extend(cls._flatten(cls.instr_category["CSR"]))
         if cfg.no_wfi == 0:
-            cls.basic_instr.append("WFI")
+            cls.basic_instr.append(riscv_instr_name_t.WFI)
 
     @classmethod
     def create_csr_filter(cls, cfg):
-        cls.include_reg.clear()
-        cls.exclude_reg.clear()
+        # Always create fresh lists.  Assigning a target/config list here and
+        # clearing it on the next invocation would otherwise erase the
+        # architectural CSR definitions (and leave nested/aliased filters).
+        cls.include_reg = []
+        cls.exclude_reg = []
 
         if cfg.enable_illegal_csr_instruction:
-            cls.exclude_reg = rcs.implemented_csr
+            cls.exclude_reg.extend(cls._flatten(rcs.implemented_csr))
         elif cfg.enable_access_invalid_csr_level:
-            cls.include_reg = cfg.invalid_priv_mode_csrs
+            cls.include_reg.extend(cls._flatten(cfg.invalid_priv_mode_csrs))
         else:
-            if cfg.init_privileged_mode == "MACHINE_MODE":      # Machine Mode
-                cls.include_reg.append("MSCRATCH")
-            elif cfg.init_privileged_mode == "SUPERVISOR_MODE":  # Supervisor Mode
-                cls.include_reg.append("SSCRATCH")
+            if cfg.init_privileged_mode == privileged_mode_t.MACHINE_MODE:  # Machine Mode
+                cls.include_reg.append(privileged_reg_t.MSCRATCH)
+            elif cfg.init_privileged_mode == privileged_mode_t.SUPERVISOR_MODE:  # Supervisor Mode
+                cls.include_reg.append(privileged_reg_t.SSCRATCH)
             else:                                               # User Mode
-                cls.include_reg.append("USCRATCH")
+                cls.include_reg.append(privileged_reg_t.USCRATCH)
+
+    @classmethod
+    def pick_csr(cls):
+        """Choose an architectural CSR address for a PyFlow instruction."""
+        def as_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        include = [as_int(value) for value in cls.include_reg]
+        include = [value for value in include if value is not None]
+        exclude = {value for value in
+                   (as_int(value) for value in cls.exclude_reg)
+                   if value is not None}
+
+        if cfg.enable_illegal_csr_instruction:
+            implemented = {as_int(value) for value in rcs.implemented_csr}
+            candidates = [value for value in range(0x1000)
+                          if value not in implemented and
+                          not (0x7B0 <= value <= 0x7B3)]
+            return random.choice(candidates)
+
+        if cfg.enable_access_invalid_csr_level and include:
+            candidates = [value for value in include if value not in exclude]
+            if candidates:
+                return random.choice(candidates)
+
+        if cfg.randomize_csr:
+            # Avoid read-only and debug CSRs for ordinary operations. The
+            # explicit illegal/invalid-level modes cover those cases.
+            candidates = [as_int(value) for value in rcs.implemented_csr]
+            candidates = [value for value in candidates
+                          if value is not None and value not in exclude and
+                          ((value >> 10) & 0x3) != 0x3 and
+                          not (0x7B0 <= value <= 0x7B3)]
+            if candidates:
+                return random.choice(candidates)
+
+        candidates = [value for value in include if value not in exclude]
+        if candidates:
+            return random.choice(candidates)
+        raise RuntimeError(
+            "No legal CSR is available for the current generator configuration")
 
     @classmethod
     def get_rand_instr(cls, include_instr=[], exclude_instr=[],
@@ -285,7 +347,10 @@ class riscv_instr:
                 cls.instr_category["STORE"]
         cls.idx = random.randrange(0, len(load_store_instr) - 1)
         name = load_store_instr[cls.idx]
-        instr_h = copy.copy(cls.instr_template[name])
+        # Operand fields are PyVSC objects. A shallow copy aliases them with
+        # the global template and with every earlier load/store instance, so a
+        # later randomization can rewrite an existing stream's base/dest regs.
+        instr_h = copy.deepcopy(cls.instr_template[name])
         return instr_h
 
     @classmethod
@@ -320,7 +385,12 @@ class riscv_instr:
             self.rs2.rand_mode = bool(self.has_rs2)
             self.rd.rand_mode = bool(self.has_rd)
             self.imm.rand_mode = bool(self.has_imm)
-            if self.category != riscv_instr_category_t.CSR:
+            # category is a non-rand PyVSC enum field. Comparing it directly
+            # while the model is elaborated creates an inline solver
+            # constraint (category != CSR), which is contradictory for CSR
+            # templates. Use the resolved enum name so CSR instructions can
+            # keep their CSR field randomized.
+            if int(self.category.get_val()) != int(riscv_instr_category_t.CSR):
                 self.csr.rand_mode = False
 
     def set_imm_len(self):
@@ -351,6 +421,8 @@ class riscv_instr:
     def convert2asm(self, prefix = " "):
         asm_str = pkg_ins.format_string(string = self.get_instr_name(),
                                         length = pkg_ins.MAX_INSTR_STR_LEN)
+        csr_value = (self.csr.get_val()
+                     if hasattr(self.csr, "get_val") else int(self.csr))
         if self.category != riscv_instr_category_t.SYSTEM:
             if self.format == riscv_instr_format_t.J_FORMAT:
                 asm_str = '{} {}, {}'.format(asm_str, self.rd.name, self.get_imm())
@@ -370,7 +442,8 @@ class riscv_instr:
                         asm_str, self.rd.name, self.get_imm(), self.rs1.name)
                 elif self.category == riscv_instr_category_t.CSR:
                     asm_str = '{} {}, 0x{}, {}'.format(
-                        asm_str, self.rd.name, self.csr, self.get_imm())
+                        asm_str, self.rd.name, format(int(csr_value), "03x"),
+                        self.get_imm())
                 else:
                     asm_str = '{} {}, {}, {}'.format(
                         asm_str, self.rd.name, self.rs1.name, self.get_imm())
@@ -393,7 +466,8 @@ class riscv_instr:
             elif self.format == riscv_instr_format_t.R_FORMAT:
                 if self.category == riscv_instr_category_t.CSR:
                     asm_str = '{} {}, 0x{}, {}'.format(
-                        asm_str, self.rd.name, self.csr, self.rs1.name)
+                        asm_str, self.rd.name, format(int(csr_value), "03x"),
+                        self.rs1.name)
                 elif self.instr_name == riscv_instr_name_t.SFENCE_VMA:
                     asm_str = "sfence.vma x0, x0"
                 else:

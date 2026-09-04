@@ -20,6 +20,7 @@ import argparse
 import os
 import random
 import re
+import shlex
 import sys
 import logging
 
@@ -105,6 +106,17 @@ def get_generator_cmd(simulator, simulator_yaml, cov, exp, debug_cmd):
                     if exp:
                         compile_cmd[i] += " +define+EXPERIMENTAL "
             sim_cmd = entry['sim']['cmd']
+            # Keep the generator in the same Python environment as run.py.
+            # A bare ``python3`` here can resolve to a system interpreter while
+            # run.py itself came from a virtualenv, causing missing vsc/PyYAML
+            # errors only after the regression has been launched.
+            if simulator == "pyflow":
+                python_cmd = shlex.quote(sys.executable)
+                if sim_cmd.startswith("python3 "):
+                    sim_cmd = python_cmd + sim_cmd[len("python3"):]
+                else:
+                    sim_cmd = re.sub(r"(?<!\S)python3(?=\s)",
+                                     python_cmd, sim_cmd, count=1)
             if ('cov_opts' in entry['sim']) and cov:
                 sim_cmd = re.sub('<cov_opts>',
                                  entry['sim']['cov_opts'].rstrip(), sim_cmd)
@@ -358,7 +370,7 @@ def run_csr_test(cmd_list, cwd, csr_file, isa, iterations, lsf_cmd,
      It calls a separate python script to generate directed CSR test code,
      located at scripts/gen_csr_test.py.
     """
-    cmd = "python3 " + cwd + "/scripts/gen_csr_test.py" + \
+    cmd = shlex.quote(sys.executable) + " " + cwd + "/scripts/gen_csr_test.py" + \
           (" --csr_file {}".format(csr_file)) + \
           (" --xlen {}".format(
               re.search(r"(?P<xlen>[0-9]+)", isa).group("xlen"))) + \
@@ -1091,6 +1103,8 @@ def load_config(args, cwd):
         elif args.target == "rv32imc_sv32":
             args.mabi = "ilp32"
             args.isa = "rv32imc_zicsr_zifencei"
+            if args.priv is None:
+                args.priv = "mu"
         elif args.target == "multi_harts":
             args.mabi = "ilp32"
             args.isa = "rv32gc_zicsr_zifencei"
@@ -1109,6 +1123,8 @@ def load_config(args, cwd):
         elif args.target == "rv64gc":
             args.mabi = "lp64"
             args.isa = "rv64gc_zicsr_zifencei"
+            if args.priv is None:
+                args.priv = "msu"
         elif args.target == "rv64gcv":
             args.mabi = "lp64"
             args.isa = "rv64gcv_zicsr_zifencei"
@@ -1118,6 +1134,8 @@ def load_config(args, cwd):
         elif args.target == "rv64imafdc":
             args.mabi = "lp64"
             args.isa = "rv64imafdc_zicsr_zifencei"
+            if args.priv is None:
+                args.priv = "msu"
         elif args.target == "nanhu_v5_1":
             if args.simulator == "pyflow":
                 sys.exit("nanhu_v5_1 is implemented by the SystemVerilog generator; "
