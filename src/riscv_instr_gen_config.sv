@@ -213,6 +213,12 @@ class riscv_instr_gen_config extends uvm_object;
   // Enable interrupt bit in MSTATUS (MIE, SIE, UIE)
   bit                    enable_interrupt;
   bit                    enable_nested_interrupt;
+  // LinkNan Smrnmi shares mtvec with ordinary traps. Keep this opt-in because
+  // other targets may use a different NMI vector and return protocol.
+  bit                    enable_nanhu_nmi_handler = 1'b0;
+  // Server-only forward-progress mode: skip the interrupted 16/32-bit
+  // instruction. Normal asynchronous interrupt recovery must leave EPC intact.
+  bit                    advance_async_epc = 1'b0;
   // We need a separate control knob for enabling timer interrupts, as Spike
   // throws an exception if xIE.xTIE is enabled
   bit                    enable_timer_irq;
@@ -431,6 +437,7 @@ class riscv_instr_gen_config extends uvm_object;
 
   constraint mtvec_c {
     mtvec_mode inside {supported_interrupt_mode};
+    if (enable_nanhu_nmi_handler) mtvec_mode == DIRECT;
     if (mtvec_mode == DIRECT) {
      soft tvec_alignment == 2;
     } else {
@@ -635,6 +642,8 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_string(hypertest_case_names, UVM_DEFAULT)
     `uvm_field_string(hypertest_case_file, UVM_DEFAULT)
     `uvm_field_int(enable_interrupt, UVM_DEFAULT)
+    `uvm_field_int(enable_nanhu_nmi_handler, UVM_DEFAULT)
+    `uvm_field_int(advance_async_epc, UVM_DEFAULT)
     `uvm_field_int(enable_timer_irq, UVM_DEFAULT)
     `uvm_field_int(bare_program_mode, UVM_DEFAULT)
     `uvm_field_int(enable_illegal_csr_instruction, UVM_DEFAULT)
@@ -727,6 +736,8 @@ class riscv_instr_gen_config extends uvm_object;
     get_int_arg_value("+svade_fault_mode=", svade_fault_mode);
     get_bool_arg_value("+enable_svpbmt=", enable_svpbmt);
     get_bool_arg_value("+enable_interrupt=", enable_interrupt);
+    get_bool_arg_value("+enable_nanhu_nmi_handler=", enable_nanhu_nmi_handler);
+    get_bool_arg_value("+advance_async_epc=", advance_async_epc);
     get_bool_arg_value("+enable_nested_interrupt=", enable_nested_interrupt);
     get_bool_arg_value("+enable_timer_irq=", enable_timer_irq);
     get_int_arg_value("+num_of_sub_program=", num_of_sub_program);

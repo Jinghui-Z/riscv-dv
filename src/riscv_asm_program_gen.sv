@@ -69,6 +69,18 @@ class riscv_asm_program_gen extends uvm_object;
     hypertest_page_table_kind_set = 0;
     hypertest_dynamic_page_tables = 0;
     check_hypertest_config();
+    if (cfg.enable_nanhu_nmi_handler) begin
+      if ((XLEN != 64) || (cfg.init_privileged_mode != MACHINE_MODE) ||
+          cfg.enable_random_boot_mode || cfg.bare_program_mode ||
+          (cfg.num_of_harts != 1) || !cfg.enable_interrupt ||
+          !cfg.no_delegation || cfg.enable_nested_interrupt ||
+          cfg.enable_random_hypertest) begin
+        `uvm_fatal(`gfn,
+          "+enable_nanhu_nmi_handler requires RV64, one M-mode hart, direct non-nested interrupts, no delegation and no Hypertest")
+      end
+    end else if (cfg.advance_async_epc) begin
+      `uvm_fatal(`gfn, "+advance_async_epc requires +enable_nanhu_nmi_handler=1")
+    end
     if (cfg.pmp_cfg.enable_random_pmp_exception) begin
       // Parse command-line PMP/ePMP overrides before validating the injection
       // mode.  The injected handler is deliberately an M-mode routine and
@@ -255,6 +267,7 @@ class riscv_asm_program_gen extends uvm_object;
     foreach(riscv_instr_pkg::supported_privileged_mode[i]) begin
       gen_interrupt_handler_section(riscv_instr_pkg::supported_privileged_mode[i], hart);
     end
+    if (cfg.enable_nanhu_nmi_handler) gen_nanhu_nmi_handler(hart);
     instr_stream.push_back(get_label("kernel_instr_end: nop", hart));
     // User stack and data pages may not be accessible when executing trap handling programs in
     // machine/supervisor mode. Generate separate kernel data/stack sections to solve it.
@@ -493,8 +506,19 @@ class riscv_asm_program_gen extends uvm_object;
     if (cfg.enable_vector_extension) begin
       randomize_vec_gpr_and_csr();
     end
-    core_is_initialized();
-    gen_dummy_csr_write(); // TODO add a way to disable xStatus read
+    if (cfg.enable_nanhu_nmi_handler) begin
+      // Keep NMIE low until the privilege CSR setup, MRET, register/stack
+      // initialization and optional dummy CSR writes have completed. With
+      // +advance_async_epc, an earlier NMI could otherwise skip the MSTATUS
+      // or MIE write and leave external interrupts disabled indefinitely.
+      gen_dummy_csr_write();
+      instr_stream.push_back({indent, "csrsi 0x300, 8 # MSTATUS.MIE"});
+      core_is_initialized();
+      instr_stream.push_back({indent, "csrsi 0x744, 8 # MNSTATUS.NMIE"});
+    end else begin
+      core_is_initialized();
+      gen_dummy_csr_write(); // TODO add a way to disable xStatus read
+    end
     if (riscv_instr_pkg::support_pmp) begin
       if (cfg.pmp_cfg.pmp_exception_active) begin
         str = {indent, $sformatf("j %0s", get_label("pmp_exception_test", hart))};
@@ -1108,6 +1132,8 @@ class riscv_asm_program_gen extends uvm_object;
       instr = {instr, $sformatf("csrw 0x%0x, x%0d # %0s",
                                  trap_vec_reg, cfg.gpr[0], trap_vec_reg.name())};
     end
+    // NMIE remains clear here. gen_init_section enables it only after the
+    // remaining CSRs and runtime state are ready for asynchronous delivery.
     gen_section(get_label("trap_vec_init", hart), instr);
   endfunction
 
@@ -1190,6 +1216,16 @@ class riscv_asm_program_gen extends uvm_object;
       // Push user mode GPR to kernel stack before executing exception handling, this is to avoid
       // exception handling routine modify user program state unexpectedly
       push_gpr_to_kernel_stack(status, scratch, cfg.mstatus_mprv, cfg.sp, cfg.tp, instr);
+      if (cfg.enable_nanhu_nmi_handler && mode == "m") begin
+        // On LinkNan, NMI enters the same direct mtvec as ordinary traps.
+        // TrapEntryMN clears NMIE; ordinary traps retain NMIE=1. GPRs have
+        // already been saved, so the scratch register is safe here.
+        instr = {instr,
+                 $sformatf("csrr x%0d, 0x744 # MNSTATUS", cfg.gpr[0]),
+                 $sformatf("andi x%0d, x%0d, 8", cfg.gpr[0], cfg.gpr[0]),
+                 $sformatf("beqz x%0d, %0snanhu_nmi_handler",
+                           cfg.gpr[0], hart_prefix(hart))};
+      end
       // Checking xStatus can be optional if ISS (like spike) has different implementation of
       // certain fields compared with the RTL processor.
       if (cfg.check_xstatus) begin
@@ -1643,6 +1679,21 @@ class riscv_asm_program_gen extends uvm_object;
     };
     gen_plic_claim_complete_section(interrupt_handler_instr, hart, mode, cause, external_cause);
     gen_plic_section(interrupt_handler_instr);
+    if (cfg.advance_async_epc && mode == MACHINE_MODE) begin
+      // The server's optional forward-progress policy skips only an M external
+      // interrupt's interrupted instruction. Software/timer IRQs retain EPC.
+      interrupt_handler_instr = {interrupt_handler_instr,
+          $sformatf("csrr x%0d, 0x%0x # MCAUSE", cfg.gpr[0], MCAUSE),
+          $sformatf("slli x%0d, x%0d, 1", cfg.gpr[0], cfg.gpr[0]),
+          $sformatf("srli x%0d, x%0d, 1", cfg.gpr[0], cfg.gpr[0]),
+          $sformatf("addi x%0d, x%0d, -%0d", cfg.gpr[0], cfg.gpr[0], M_EXTERNAL_INTR),
+          $sformatf("bnez x%0d, %0snanhu_mei_return_pc_done",
+                    cfg.gpr[0], hart_prefix(hart))};
+      gen_advance_async_epc_instr(interrupt_handler_instr, MEPC,
+                                  $sformatf("%0snanhu_mei_epc_written", hart_prefix(hart)));
+      interrupt_handler_instr.push_back(
+          $sformatf("%0snanhu_mei_return_pc_done: nop", hart_prefix(hart)));
+    end
     // Restore user mode GPR value from kernel stack before return
     pop_gpr_from_kernel_stack(status, scratch, cfg.mstatus_mprv,
                               cfg.sp, cfg.tp, interrupt_handler_instr);
@@ -1657,6 +1708,41 @@ class riscv_asm_program_gen extends uvm_object;
     end
     gen_section(get_label($sformatf("%0smode_intr_handler", mode_prefix), hart),
                 interrupt_handler_instr);
+  endfunction
+
+  // This is deliberately optional. Architectural asynchronous interrupt
+  // return resumes at EPC without changing it. The closed-server stress mode
+  // instead skips a 16/32-bit instruction to force forward progress. The
+  // dedicated test boots in M-mode so a machine-mode halfword load from EPC
+  // addresses the interrupted code without S/U translation ambiguity.
+  virtual function void gen_advance_async_epc_instr(ref string instr[$],
+                                                   input int unsigned epc_csr,
+                                                   input string done_label);
+    instr = {instr,
+        $sformatf("csrr x%0d, 0x%0x", cfg.gpr[0], epc_csr),
+        $sformatf("lhu x%0d, 0(x%0d)", cfg.gpr[1], cfg.gpr[0]),
+        $sformatf("andi x%0d, x%0d, 3", cfg.gpr[1], cfg.gpr[1]),
+        $sformatf("addi x%0d, x%0d, 2", cfg.gpr[0], cfg.gpr[0]),
+        $sformatf("addi x%0d, x%0d, -3", cfg.gpr[1], cfg.gpr[1]),
+        $sformatf("bnez x%0d, %0s", cfg.gpr[1], done_label),
+        $sformatf("addi x%0d, x%0d, 2", cfg.gpr[0], cfg.gpr[0]),
+        $sformatf("%0s: csrw 0x%0x, x%0d", done_label, epc_csr, cfg.gpr[0])};
+  endfunction
+
+  // NanHu Smrnmi NMI_31/NMI_43 enter through direct MTVEC, save MNEPC and
+  // clear MNSTATUS.NMIE. The shared entry has saved GPRs before branching here.
+  // GNU in this environment does not yet accept the Smrnmi mnemonic, so emit
+  // the ratified MNRET encoding; Spike decodes it when its ISA has _smrnmi.
+  virtual function void gen_nanhu_nmi_handler(int hart);
+    string nmi_instr[$];
+    if (cfg.advance_async_epc) begin
+      gen_advance_async_epc_instr(nmi_instr, 'h741,
+                                  $sformatf("%0snanhu_nmi_epc_written", hart_prefix(hart)));
+    end
+    pop_gpr_from_kernel_stack(MSTATUS, MSCRATCH, cfg.mstatus_mprv,
+                              cfg.sp, cfg.tp, nmi_instr);
+    nmi_instr.push_back(".word 0x70200073 # MNRET");
+    gen_section(get_label("nanhu_nmi_handler", hart), nmi_instr);
   endfunction
 
   //---------------------------------------------------------------------------------------

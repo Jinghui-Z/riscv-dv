@@ -907,14 +907,19 @@ def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
     """
     for iss in iss_list.split(","):
         log_dir = ("{}/{}_sim".format(output_dir, iss))
-        base_cmd = parse_iss_yaml(iss, iss_yaml, isa, priv, setting_dir, debug_cmd)
-        base_cmd += iss_opts
         logging.info("{} sim log dir: {}".format(iss, log_dir))
         run_cmd_output(["mkdir", "-p", log_dir])
         for test in test_list:
             if 'no_iss' in test and test['no_iss'] == 1:
                 continue
             else:
+                # A test may require an ISS-only extension whose GNU assembler
+                # does not yet accept as -march (for example Smrnmi/MNRET).
+                # Keep the override local to this test, not the whole target.
+                test_isa = test.get('iss_isa', isa)
+                base_cmd = parse_iss_yaml(iss, iss_yaml, test_isa, priv,
+                                          setting_dir, debug_cmd)
+                base_cmd += iss_opts
                 for i in range(0, test['iterations']):
                     prefix = ("{}/asm_test/{}_{}".format(
                         output_dir, test['test'], i))
