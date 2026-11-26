@@ -6,6 +6,8 @@ work/
 /.cproject
 /.project
 /outdir/
+/out/
+/riscv_asm_test_*.S
 ucli.key
 qrun.out/
 qrun.log

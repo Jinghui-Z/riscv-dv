@@ -1,0 +1,343 @@
+#ifndef RVH_TESTS
+#define RVH_TESTS
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <encoding.h>
+#include <csrs.h>
+#include <instructions.h>
+#include <platform.h>
+
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
+#ifndef LOG_LEVEL
+#define LOG_LEVEL   LOG_INFO
+#endif
+
+#define CDFLT  "\x1B[0m"
+#define CRED  "\x1B[31m"
+#define CGRN  "\x1B[32m"
+#define CYEL  "\x1B[33m"
+#define CBLU  "\x1B[34m"
+#define CMAG  "\x1B[35m"
+#define CCYN  "\x1B[36m"
+#define CWHT  "\x1B[37m"
+
+#define LOG_NONE      (0)	
+#define LOG_ERROR	  (1)
+#define LOG_INFO      (2)
+#define LOG_DETAIL    (3)
+#define LOG_WARNING   (4)
+#define LOG_VERBOSE   (5)
+#define LOG_DEBUG     (6)
+
+#if LOG_LEVEL >= LOG_ERROR
+# define ERROR(str...)	{\
+    printf(CRED "ERROR: " CDFLT str );\
+    printf(" (%s, %d)\n", __func__, __LINE__);\
+    exit(0);\
+    while(1);\
+}
+#else
+# define ERROR(...) { exit(-1); while(1); }
+#endif
+
+#if LOG_LEVEL >= LOG_INFO
+# define INFO(str...)	{ printf(str); printf("\n"); }
+#else
+# define INFO(...)
+#endif
+
+#if LOG_LEVEL >= LOG_DETAIL
+# define DETAIL(str...)	{ printf(str); printf("\n"); }
+#else
+# define DETAIL(...)
+#endif
+
+#if LOG_LEVEL >= LOG_WARNING
+# define WARN(str...)	{ printf(CYEL "WARNING: " CDFLT str); printf("\n"); }
+#else
+# define WARN(...)
+#endif
+
+#if LOG_LEVEL >= LOG_VERBOSE
+# define VERBOSE(str...)	{ printf("VERBOSE: " str); printf("\n"); }
+#else
+# define VERBOSE(...)
+#endif
+
+#if LOG_LEVEL >= LOG_DEBUG
+# define DEBUG(str...)	{ printf("DEBUG: " str); printf("\n"); }
+#else
+# define DEBUG(...)
+#endif
+
+enum priv {PRIV_VU = 0, PRIV_HU = 1, PRIV_VS = 2, PRIV_HS = 3, PRIV_M = 4, PRIV_MAX};
+#define HANDLER_RETURN_MNRET 5U
+extern unsigned curr_priv;
+extern bool rnmi_handler_enabled;
+
+static const char* priv_strs[] = {
+    [PRIV_VU] = "vu",
+    [PRIV_VS] = "vs",
+    [PRIV_HU] = "hu",
+    [PRIV_HS] = "hs",
+    [PRIV_M] = "m",
+};
+
+enum ecall {ECALL_GOTO_PRIV = 1};
+
+extern struct exception {
+    bool testing;
+    bool triggered;
+    enum priv priv;
+    uint64_t cause;
+    uint64_t epc;
+    uint64_t tval;
+    uint64_t tinst;
+    uint64_t tval2;
+    bool gva;
+    bool xpv;
+    uintptr_t fault_inst;
+} excpt;
+
+typedef bool (*test_func_t)();
+extern test_func_t* test_table;
+extern size_t test_table_size;
+
+static inline const char* test_priv_str(unsigned priv)
+{
+    return (priv < PRIV_MAX && priv_strs[priv] != NULL) ? priv_strs[priv] : "?";
+}
+
+static inline void test_print_assert_failure_context(const char* file, int line, const char* expr)
+{
+    printf("\n\tassert_site: %s:%d", file, line);
+    printf("\n\tassert_expr: %s", expr);
+    printf("\n\texcpt: testing=%d triggered=%d priv=%s cause=0x%llx epc=0x%llx tval=0x%llx tval2=0x%llx tinst=0x%llx fault_inst=0x%llx curr=%s",
+        excpt.testing,
+        excpt.triggered,
+        test_priv_str(excpt.priv),
+        (unsigned long long)excpt.cause,
+        (unsigned long long)excpt.epc,
+        (unsigned long long)excpt.tval,
+        (unsigned long long)excpt.tval2,
+        (unsigned long long)excpt.tinst,
+        (unsigned long long)excpt.fault_inst,
+        test_priv_str(curr_priv));
+}
+
+#define TEST_START()\
+    const char* __test_name = __func__;\
+    bool test_status = true;\
+    if(LOG_LEVEL >= LOG_INFO) printf(CBLU "%-70s" CDFLT, __test_name);\
+    if(LOG_LEVEL >= LOG_DETAIL) printf("\n");
+
+#define TEST_REGISTER(test)\
+    bool test();\
+    static test_func_t test ## func __attribute__((section(".test_table"), used)) = test;
+
+#define TEST_ASSERT(test, cond, ...) do {\
+    const char* __test_msg = (test);\
+    bool __test_cond = (cond);\
+    if(LOG_LEVEL >= LOG_DETAIL){\
+        const size_t __line_size = 140;\
+        const size_t __size = strlen(__test_msg);\
+        printf(CBLU "\t%-140.*s" CDFLT, (int)__line_size, __test_msg);\
+        for(size_t __off = __line_size; __off < __size; __off += __line_size)\
+            printf(CBLU "\n\t%-140.*s" CDFLT, (int)__line_size, &__test_msg[__off]);\
+        printf("%s" CDFLT, __test_cond ? CGRN "PASSED" : CRED "FAILED");\
+        if(!__test_cond) {\
+            __VA_OPT__(printf("\n\tassert_detail: "); printf(__VA_ARGS__);)\
+            test_print_assert_failure_context(__FILE__, __LINE__, #cond);\
+        }\
+        printf("\n");\
+    }\
+    test_status = test_status && __test_cond;\
+    /*if(!test_status) goto failed; /**/\
+} while (0)
+
+
+
+//v扩展时防止被编译成向量指令干扰测试环境
+// 使用宏控制是否启用向量扩展
+// 如果启用了向量扩展，声明函数
+#ifdef __riscv_vector
+__attribute__((target("arch=rv64imac_zicsr")))
+void test_setup_except_function();
+
+#define TEST_SETUP_EXCEPT() test_setup_except_function()
+
+#else
+// 如果没有使用向量扩展，保持原有的宏定义
+#define TEST_SETUP_EXCEPT() {\
+    __sync_synchronize();\
+    excpt.testing = true;\
+    excpt.triggered = false;\
+    excpt.fault_inst = 0;\
+    __sync_synchronize();\
+    DEBUG("setting up exception test");\
+}
+#endif
+
+
+
+#define TEST_EXEC_EXCEPT(addr) {\
+    asm volatile(\
+        "la t0, 1f\n\t"\
+        "sd t0, %1\n\t"\
+        "1:\n\t"\
+        "jr  %0\n\t"\
+        :: "r"(addr), "m"(excpt.fault_inst) : "t0", "memory"\
+    );\
+}
+
+#define TEST_EXEC_SRET() {\
+    asm volatile(\
+        "la t0, 1f\n\t"\
+        "csrw sepc, t0\n\t"\
+        "sret\n\t"\
+        "1:\n\t"\
+        ::: "t0", "memory"\
+    );\
+}
+
+#define TEST_EXEC_MRET() {\
+    asm volatile(\
+        "la t0, 1f\n\t"\
+        "csrw mepc, t0\n\t"\
+        "mret\n\t"\
+        "1:\n\t"\
+        ::: "t0", "memory"\
+    );\
+}
+
+
+#define TEST_END(test) {\
+failed:\
+    if(LOG_LEVEL >= LOG_INFO && LOG_LEVEL < LOG_VERBOSE){\
+         printf("%s\n" CDFLT, (test_status) ? CGRN "PASSED" : CRED "FAILED");\
+    }\
+    goto_priv(PRIV_M);\
+    reset_state();\
+    return (test_status);\
+}
+
+#define INFO_PRINT(var) {\
+    INFO(#var ": 0x%llx", (var));\
+}
+
+#define INFO_PRINT_CSR(csr){\
+    INFO(#csr ": 0x%llx", CSRR(csr));\
+}
+
+#define INFO_PRINT_XCEPT(){\
+    INFO("excpt.triggered = %d", excpt.triggered);\
+    INFO("excpt.priv = %s", priv_strs[excpt.priv]);\
+    INFO("excpt.cause = 0x%llx", excpt.cause);\
+    INFO("excpt.tval = 0x%llx", excpt.tval);\
+    INFO("excpt.tval2 = 0x%llx", excpt.tval2);\
+    INFO("excpt.tinst = 0x%llx", excpt.tinst);\
+}
+
+#define DEBUG_PRINT(var) {\
+    DEBUG(#var ": 0x%llx", (var));\
+}
+
+#define DEBUG_PRINT_CSR(csr){\
+    DEBUG(#csr ": 0x%llx", CSRR(csr));\
+}
+
+#define DEBUG_PRINT_XCEPT(){\
+    DEBUG("excpt.triggered = %d", excpt.triggered);\
+    DEBUG("excpt.priv = %s", priv_strs[excpt.priv]);\
+    DEBUG("excpt.cause = 0x%llx", excpt.cause);\
+    DEBUG("excpt.tval = 0x%llx", excpt.tval);\
+    DEBUG("excpt.tval2 = 0x%llx", excpt.tval2);\
+    INFO("excpt.tinst = 0x%llx", excpt.tinst);\
+}
+
+#define check_csr_wrrd(name, addr, wr, rd){\
+    uint64_t temp = CSRR(addr);\
+    CSRW(addr, wr);\
+    uint64_t val = CSRR(addr);\
+    TEST_ASSERT(name, (rd) == (val), "%016lx %016lx %016lx", wr, val, rd);\
+    CSRW(addr, temp);\
+}
+
+#define check_csr_rd(name, addr, rd){\
+    uint64_t val = CSRR(addr);\
+    TEST_ASSERT(name, ((rd) == (val)), "%16c %016lx %016lx", '-', val, rd);\
+}
+
+#define check_csr_rd_mask(name, addr, rd, mask){\
+    uint64_t val = CSRR(addr);\
+    val = val & mask;\
+    TEST_ASSERT(name, ((rd) == (val)), "%16c %016lx %016lx", '-', val, rd);\
+}
+
+static inline uint64_t read64(uintptr_t addr){
+    return *((volatile uint64_t*) addr);
+}
+
+static inline uint32_t read32(uintptr_t addr){
+    return *((volatile uint32_t*) addr);
+}
+
+static inline uint16_t read16(uintptr_t addr){
+    return *((volatile uint16_t*) addr);    
+}
+
+static inline uint8_t read8(uintptr_t addr){
+    return *((volatile uint8_t*) addr);    
+}
+
+static inline void write64(uintptr_t addr, uint64_t val){
+    *((volatile uint64_t*) addr) = val;
+}
+
+static inline void write32(uintptr_t addr, uint32_t val){
+    *((volatile uint32_t*) addr) = val;
+}
+
+static inline void write16(uintptr_t addr, uint16_t val){
+    *((volatile uint16_t*) addr) = val;    
+}
+
+static inline void write8(uintptr_t addr, uint8_t val){
+    *((volatile uint8_t*) addr) = val;    
+}
+
+static inline uint32_t read_instruction(uintptr_t addr) {
+
+    uint32_t instruction = 0;
+
+    if((addr & 0b1) != 0) {
+        ERROR("trying to read unaligned instruction (%s, %d)", __func__, __LINE__);
+    }
+
+    instruction = *((uint16_t*)addr);
+    if(!INS_COMPRESSED(instruction)) {
+        instruction |= (*((uint16_t*)(addr + 2)) << 16);
+    }
+
+    return instruction;
+}
+
+extern bool double_trap_enabled;  // 允许其他文件访问变量
+
+uint32_t expand_compressed_instruction(uint16_t ins);
+void reset_state();
+void set_prev_priv(int target_priv);
+void goto_priv(int target_priv);
+void goto_priv_u_to_m_direct(int target_priv);
+void excpt_info();
+uint64_t mhandler();        //为了测试xtvec_test
+uint64_t hshandler();        //为了测试xtvec_test
+uint64_t vshandler();        //为了测试xtvec_test
+
+#endif

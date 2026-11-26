@@ -1,0 +1,2 @@
+EXTRA_CFLAGS=-DAI_SCALAR_REG_RANDOM_SEED=3 \
+python3 compile_elf.py --plat spike --name ai_arch_scalar_b_extension_matrix_corner

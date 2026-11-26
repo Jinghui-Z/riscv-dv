@@ -1,0 +1,277 @@
+#ifndef AI_MICRO_MEMBLOCK_LRSC_TRIGGER_COMMON_H
+#define AI_MICRO_MEMBLOCK_LRSC_TRIGGER_COMMON_H
+
+#include <rvh_test.h>
+#include <page_tables.h>
+#include <stdint.h>
+
+/* Public case prototypes. Definitions live in the partNN sources. */
+bool ai_micro_memblock_lr_load_trigger_breakpoint_does_not_create_reservation_corner();
+bool ai_micro_memblock_lr_store_trigger_does_not_fire_on_lr_then_fresh_lrsc_succeeds_corner();
+bool ai_micro_memblock_amoadd_load_trigger_breakpoint_suppresses_rmw_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_store_trigger_breakpoint_suppresses_rmw_then_clear_succeeds_corner();
+bool ai_micro_memblock_sc_store_trigger_breakpoint_blocks_commit_then_fresh_lrsc_succeeds_corner();
+bool ai_micro_memblock_sc_load_trigger_does_not_fire_on_sc_then_fresh_lrsc_succeeds_corner();
+bool ai_micro_memblock_amoadd_load_store_chain_breakpoint_suppresses_rmw_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_w_upper_word_store_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_lr_w_upper_word_load_trigger_no_reservation_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_sc_w_upper_word_load_trigger_does_not_fire_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_lr_w_upper_word_store_trigger_does_not_fire_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_amoadd_w_upper_word_load_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_sc_w_upper_word_store_trigger_breakpoint_blocks_commit_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_amoadd_w_lower_word_load_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_w_lower_word_store_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_lr_w_lower_word_load_trigger_no_reservation_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_lr_w_lower_word_store_trigger_does_not_fire_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_sc_w_lower_word_load_trigger_does_not_fire_then_fresh_lrsc_updates_lane_corner();
+bool ai_micro_memblock_amoswap_w_lower_word_load_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_w_lower_word_store_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_w_upper_word_load_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_w_upper_word_store_trigger_breakpoint_suppresses_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_upper_word_load_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_upper_word_store_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_lower_word_load_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_lower_word_store_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_w_upper_word_store_trigger_breakpoint_suppresses_unsigned_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_w_upper_word_load_trigger_breakpoint_suppresses_unsigned_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_w_lower_word_load_trigger_breakpoint_suppresses_unsigned_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_w_lower_word_store_trigger_breakpoint_suppresses_unsigned_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_w_upper_word_load_trigger_breakpoint_suppresses_unsigned_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_w_upper_word_store_trigger_breakpoint_suppresses_unsigned_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_w_lower_word_load_trigger_breakpoint_suppresses_unsigned_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_w_lower_word_store_trigger_breakpoint_suppresses_unsigned_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_w_upper_word_load_trigger_breakpoint_suppresses_signed_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_w_upper_word_store_trigger_breakpoint_suppresses_signed_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_w_lower_word_load_trigger_breakpoint_suppresses_signed_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_w_lower_word_store_trigger_breakpoint_suppresses_signed_max_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_w_lower_word_load_trigger_breakpoint_suppresses_logic_xor_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_w_lower_word_store_trigger_breakpoint_suppresses_logic_xor_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_w_upper_word_load_trigger_breakpoint_suppresses_logic_xor_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_w_upper_word_store_trigger_breakpoint_suppresses_logic_xor_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_w_lower_word_load_trigger_breakpoint_suppresses_logic_or_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_w_lower_word_store_trigger_breakpoint_suppresses_logic_or_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_w_upper_word_load_trigger_breakpoint_suppresses_logic_or_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_w_upper_word_store_trigger_breakpoint_suppresses_logic_and_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_w_upper_word_store_trigger_breakpoint_suppresses_logic_or_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_w_upper_word_load_trigger_breakpoint_suppresses_logic_and_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_w_lower_word_load_trigger_breakpoint_suppresses_logic_and_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_w_lower_word_store_trigger_breakpoint_suppresses_logic_and_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_d_load_trigger_breakpoint_suppresses_logic_and_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_d_store_trigger_breakpoint_suppresses_logic_and_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_d_load_trigger_breakpoint_suppresses_logic_or_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_d_store_trigger_breakpoint_suppresses_logic_or_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_d_load_trigger_breakpoint_suppresses_logic_xor_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_d_store_trigger_breakpoint_suppresses_logic_xor_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_d_load_trigger_breakpoint_suppresses_signed_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_d_store_trigger_breakpoint_suppresses_signed_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_d_load_trigger_breakpoint_suppresses_unsigned_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_d_store_trigger_breakpoint_suppresses_unsigned_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_d_load_trigger_breakpoint_suppresses_signed_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_d_store_trigger_breakpoint_suppresses_signed_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_d_load_trigger_breakpoint_suppresses_unsigned_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_d_store_trigger_breakpoint_suppresses_unsigned_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_d_load_trigger_breakpoint_suppresses_swap_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_d_store_trigger_breakpoint_suppresses_swap_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_d_load_store_trigger_breakpoint_suppresses_swap_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomaxu_d_load_store_trigger_breakpoint_suppresses_unsigned_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_d_load_store_trigger_breakpoint_suppresses_signed_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amominu_d_load_store_trigger_breakpoint_suppresses_unsigned_min_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomax_d_load_store_trigger_breakpoint_suppresses_signed_max_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoand_d_load_store_trigger_breakpoint_suppresses_logic_and_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoor_d_load_store_trigger_breakpoint_suppresses_logic_or_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoxor_d_load_store_trigger_breakpoint_suppresses_logic_xor_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_d_load_store_trigger_breakpoint_suppresses_add_doubleword_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_w_lower_word_load_store_trigger_breakpoint_suppresses_add_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_d_load_store_trigger_repeated_breakpoint_suppresses_add_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_w_upper_word_load_store_trigger_breakpoint_suppresses_add_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_w_lower_word_load_store_trigger_breakpoint_suppresses_replacement_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoswap_w_upper_word_load_store_trigger_breakpoint_suppresses_replacement_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_lower_word_load_store_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amomin_w_upper_word_load_store_trigger_breakpoint_suppresses_signed_min_lane_then_clear_succeeds_corner();
+bool ai_micro_memblock_amoadd_d_chain_slot0_mismatch_suppresses_sibling_slot1_match_corner();
+bool ai_micro_memblock_sc_d_chain_slot0_mismatch_suppresses_sibling_slot1_commit_corner();
+bool ai_micro_memblock_lr_d_chain_slot0_mismatch_suppresses_sibling_slot1_load_reservation_corner();
+bool ai_micro_memblock_amoadd_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_lane_commit_corner();
+bool ai_micro_memblock_lr_d_chain_slot0_store_access_mismatch_suppresses_sibling_slot1_load_reservation_corner();
+bool ai_micro_memblock_sc_d_chain_slot0_load_access_mismatch_suppresses_sibling_slot1_store_commit_corner();
+bool ai_micro_memblock_lr_w_upper_chain_slot0_store_access_mismatch_suppresses_sibling_slot1_load_reservation_corner();
+bool ai_micro_memblock_sc_w_upper_chain_slot0_load_access_mismatch_suppresses_sibling_slot1_store_commit_corner();
+bool ai_micro_memblock_sc_w_lower_chain_slot0_load_access_mismatch_suppresses_sibling_slot1_store_commit_corner();
+bool ai_micro_memblock_lr_w_lower_chain_slot0_store_access_mismatch_suppresses_sibling_slot1_load_reservation_corner();
+bool ai_micro_memblock_amoadd_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_lane_commit_corner();
+bool ai_micro_memblock_amoswap_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_lane_commit_corner();
+bool ai_micro_memblock_amoswap_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_lane_commit_corner();
+bool ai_micro_memblock_amoand_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_logic_lane_commit_corner();
+bool ai_micro_memblock_amoand_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_logic_lane_commit_corner();
+bool ai_micro_memblock_amoor_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_logic_or_lane_commit_corner();
+bool ai_micro_memblock_amoxor_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_logic_xor_lane_commit_corner();
+bool ai_micro_memblock_amoor_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_logic_or_lane_commit_corner();
+bool ai_micro_memblock_amomax_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_signed_max_lane_commit_corner();
+bool ai_micro_memblock_amominu_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_min_lane_commit_corner();
+bool ai_micro_memblock_amomaxu_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_max_lane_commit_corner();
+bool ai_micro_memblock_amomin_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_signed_min_lane_commit_corner();
+bool ai_micro_memblock_amomaxu_d_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_max_commit_corner();
+bool ai_micro_memblock_amomin_d_chain_slot0_mismatch_suppresses_sibling_slot1_signed_min_commit_corner();
+bool ai_micro_memblock_amomax_d_chain_slot0_mismatch_suppresses_sibling_slot1_signed_max_commit_corner();
+bool ai_micro_memblock_amominu_d_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_min_commit_corner();
+bool ai_micro_memblock_amomax_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_signed_max_lane_commit_corner();
+bool ai_micro_memblock_amomaxu_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_max_lane_commit_corner();
+bool ai_micro_memblock_amoxor_w_upper_chain_slot0_mismatch_suppresses_sibling_slot1_logic_xor_lane_commit_corner();
+bool ai_micro_memblock_amomin_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_signed_min_lane_commit_corner();
+bool ai_micro_memblock_amominu_w_lower_chain_slot0_mismatch_suppresses_sibling_slot1_unsigned_min_lane_commit_corner();
+bool ai_micro_memblock_amoand_d_chain_slot0_mismatch_suppresses_sibling_slot1_logic_and_commit_corner();
+bool ai_micro_memblock_amoor_d_chain_slot0_mismatch_suppresses_sibling_slot1_logic_or_commit_corner();
+bool ai_micro_memblock_amoxor_d_chain_slot0_mismatch_suppresses_sibling_slot1_logic_xor_commit_corner();
+
+#define AI_MEMBLOCK_LRSC_TRIGGER_MCONTROL6_MSU_BASE 0x6000000000000058ULL
+#define AI_MEMBLOCK_LRSC_TRIGGER_LOAD 0x1ULL
+#define AI_MEMBLOCK_LRSC_TRIGGER_STORE 0x2ULL
+#define AI_MEMBLOCK_LRSC_TRIGGER_CHAIN 0x800ULL
+
+static inline void ai_memblock_lrsc_trigger_clear_mcontrol6_slot(size_t slot)
+{
+    goto_priv(PRIV_M);
+    CSRW(CSR_TSELECT, slot);
+    asm volatile("csrw tdata1, x0");
+    CSRW(CSR_TDATA2, 0);
+}
+
+static inline void ai_memblock_lrsc_trigger_clear_mcontrol6_0(void)
+{
+    ai_memblock_lrsc_trigger_clear_mcontrol6_slot(0);
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_mcontrol6_tdata1_chain(
+    uint64_t access_bits, bool chain)
+{
+    uint64_t value = AI_MEMBLOCK_LRSC_TRIGGER_MCONTROL6_MSU_BASE | access_bits;
+    if (chain) {
+        value |= AI_MEMBLOCK_LRSC_TRIGGER_CHAIN;
+    }
+    return value;
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_mcontrol6_tdata1(uint64_t access_bits)
+{
+    return ai_memblock_lrsc_trigger_mcontrol6_tdata1_chain(access_bits, false);
+}
+
+static inline void ai_memblock_lrsc_trigger_arm_mcontrol6_slot_chain(
+    size_t slot, uintptr_t addr, uint64_t access_bits, bool chain)
+{
+    goto_priv(PRIV_M);
+    CSRW(CSR_TSELECT, slot);
+    asm volatile("csrw tdata1, x0");
+    CSRW(CSR_TDATA2, addr);
+    CSRW(CSR_TDATA1,
+        ai_memblock_lrsc_trigger_mcontrol6_tdata1_chain(access_bits, chain));
+}
+
+static inline void ai_memblock_lrsc_trigger_arm_mcontrol6_slot(size_t slot,
+    uintptr_t addr, uint64_t access_bits)
+{
+    ai_memblock_lrsc_trigger_arm_mcontrol6_slot_chain(slot, addr, access_bits,
+        false);
+}
+
+static inline void ai_memblock_lrsc_trigger_arm_mcontrol6_0(uintptr_t addr,
+    uint64_t access_bits)
+{
+    ai_memblock_lrsc_trigger_arm_mcontrol6_slot(0, addr, access_bits);
+}
+
+static inline pte_t *ai_memblock_lrsc_trigger_hs_leaf_entry(enum test_page page)
+{
+#ifdef sv48
+    return &hspt[4][page];
+#else
+    return &hspt[2][page];
+#endif
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_hs_leaf_value(
+    enum test_page page, uint64_t flags)
+{
+    return (phys_page_base(page) >> 2) | flags;
+}
+
+static inline void ai_memblock_lrsc_trigger_set_hs_leaf(enum test_page page,
+    uint64_t flags)
+{
+    goto_priv(PRIV_M);
+    *ai_memblock_lrsc_trigger_hs_leaf_entry(page) =
+        ai_memblock_lrsc_trigger_hs_leaf_value(page, flags);
+    goto_priv(PRIV_HS);
+    sfence_vma();
+}
+
+static inline void ai_memblock_lrsc_trigger_map_alias_to_base(
+    enum test_page alias_page, enum test_page base_page)
+{
+    *ai_memblock_lrsc_trigger_hs_leaf_entry(alias_page) =
+        (phys_page_base(base_page) >> 2) | PTE_V | PTE_AD | PTE_RWX;
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_enable_breakpoint_delivery(void)
+{
+    goto_priv(PRIV_M);
+    uint64_t saved_mstatus = CSRR(CSR_MSTATUS);
+    CSRS(CSR_MSTATUS, MSTATUS_MIE | MSTATUS_SIE);
+    return saved_mstatus;
+}
+
+static inline void ai_memblock_lrsc_trigger_reenable_breakpoint_delivery(void)
+{
+    goto_priv(PRIV_M);
+    CSRS(CSR_MSTATUS, MSTATUS_MIE | MSTATUS_SIE);
+}
+
+static inline void ai_memblock_lrsc_trigger_restore_machine_status(uint64_t saved_mstatus)
+{
+    goto_priv(PRIV_M);
+    CSRW(CSR_MSTATUS, saved_mstatus);
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_lr_d64(uintptr_t addr)
+{
+    uint64_t value;
+    asm volatile(
+        "lr.d %0, 0(%1)\n\t"
+        : "=r"(value) : "r"(addr) : "memory"
+    );
+    return value;
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_lr_d64_seed(uintptr_t addr,
+    uint64_t seed)
+{
+    uint64_t value = seed;
+    asm volatile(
+        "lr.d %0, 0(%1)\n\t"
+        : "+r"(value) : "r"(addr) : "memory"
+    );
+    return value;
+}
+
+static inline uint32_t ai_memblock_lrsc_trigger_sc_d_status(uintptr_t addr,
+    uint64_t value)
+{
+    asm volatile(
+        "sc.d %0, %0, 0(%1)\n\t"
+        : "+r"(value) : "r"(addr) : "memory"
+    );
+    return (uint32_t)value;
+}
+
+static inline uint64_t ai_memblock_lrsc_trigger_sc_d_status_seed(
+    uintptr_t addr, uint64_t value, uint64_t seed)
+{
+    uint64_t status = seed;
+    asm volatile(
+        "sc.d %0, %2, 0(%1)\n\t"
+        : "+r"(status) : "r"(addr), "r"(value) : "memory"
+    );
+    return status;
+}
+
+#endif /* AI_MICRO_MEMBLOCK_LRSC_TRIGGER_COMMON_H */

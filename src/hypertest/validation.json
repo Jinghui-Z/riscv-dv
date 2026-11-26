@@ -1,0 +1,779 @@
+{
+  "cases": {
+    "ai_arch_scalar_illegal_field_encoding_matrix_corner": {
+      "completed_count": 2,
+      "evidence": [
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.S",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.o",
+        "out/hypertest_source_101603_r2/sim_hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.hypertest-validation.json",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.S": "1f2ff5e66cd2a1e28d79a59b8d2293d623bde36d6cfcea37c16e2dd8883cac0f",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.o": "d7f05d67dd01421018e22fafbd1f7370eaa44c22b7af35187f0df6107645d651",
+        "out/hypertest_source_101603_r2/sim_hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log": "6995628555a6cffe35facad563aa88ccf558e0afd64463cb0a87b4c98654adfd",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.hypertest-validation.json": "31d851fd8942d744cf0734bac8f3d2902c6020c0c716e909ab10739ff6bf1365",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log": "51bd3c70bb31758d2c7d2fbba613f7793b1f4557dc06c2cc1537e3bddc767287"
+      },
+      "runs": [
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1,
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2,
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+          },
+          "run": "out/hypertest_random_pool_101607_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.S",
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.o",
+            "out/hypertest_source_101603_r2/sim_hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.hypertest-validation.json",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.S": "1f2ff5e66cd2a1e28d79a59b8d2293d623bde36d6cfcea37c16e2dd8883cac0f",
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.o": "d7f05d67dd01421018e22fafbd1f7370eaa44c22b7af35187f0df6107645d651",
+            "out/hypertest_source_101603_r2/sim_hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log": "6995628555a6cffe35facad563aa88ccf558e0afd64463cb0a87b4c98654adfd",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.hypertest-validation.json": "31d851fd8942d744cf0734bac8f3d2902c6020c0c716e909ab10739ff6bf1365",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_arch_scalar_illegal_field_encoding_matrix_corner_575bef15938b_0.log": "51bd3c70bb31758d2c7d2fbba613f7793b1f4557dc06c2cc1537e3bddc767287"
+          },
+          "run": "out/hypertest_source_101603_r2",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner": {
+      "completed_count": 1,
+      "evidence": [
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.S",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.o",
+        "out/hypertest_representative_101605/sim_hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.hypertest-validation.json",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.S": "4b6f36533c94ce01a473a92d2d1dc3550074590301a1bb4babca3a3e08cf517b",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.o": "50c9cae4c35fde05e3291d533296f2301a82513f2a4e5144974facd448c0b222",
+        "out/hypertest_representative_101605/sim_hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log": "c73f079cbaa7cf04af201031a86b2a26bb9f79118141a81c8569f2527ad06bef",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.hypertest-validation.json": "fbc3b7153256549aaf3a156bacea66fef75415d250019730933f358bd9f17e77",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log": "e9231a37d708d4c63b24d9b015b0db0a1ad7085dd2827e81c8c7a00e400d6647"
+      },
+      "runs": [
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.S",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.o",
+            "out/hypertest_representative_101605/sim_hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.hypertest-validation.json",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.S": "4b6f36533c94ce01a473a92d2d1dc3550074590301a1bb4babca3a3e08cf517b",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.o": "50c9cae4c35fde05e3291d533296f2301a82513f2a4e5144974facd448c0b222",
+            "out/hypertest_representative_101605/sim_hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log": "c73f079cbaa7cf04af201031a86b2a26bb9f79118141a81c8569f2527ad06bef",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.hypertest-validation.json": "fbc3b7153256549aaf3a156bacea66fef75415d250019730933f358bd9f17e77",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner_887da060dc08_0.log": "e9231a37d708d4c63b24d9b015b0db0a1ad7085dd2827e81c8c7a00e400d6647"
+          },
+          "run": "out/hypertest_representative_101605",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": {
+      "completed_count": 3,
+      "evidence": [
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.S",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.o",
+        "out/hypertest_source_101603_r2/sim_hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.hypertest-validation.json",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.S": "a34626a8e4802978de15247e44bc22bfb2838e199e4dd031ee95adde159612dc",
+        "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.o": "2b73c9ced9e34b40701032b1d05cbcf4ffc4cb6c24403208eef2fc0a5d972c65",
+        "out/hypertest_source_101603_r2/sim_hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log": "6240e32eb2c112059b2c6e1132e4d348f465cce67c08152f2061efcc4b50f566",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.hypertest-validation.json": "e3781d145b41757c0fb4b78c3142e5cad403639520c32ab7f3eebb332cd658e7",
+        "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log": "994f61ab881d20bfff5bdb5bf27e46d3092d83fcf7ba0b2b9da665a6d5ca7635"
+      },
+      "runs": [
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1,
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2,
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+          },
+          "run": "out/hypertest_random_pool_101607_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.S",
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.o",
+            "out/hypertest_source_101603_r2/sim_hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.hypertest-validation.json",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.S": "a34626a8e4802978de15247e44bc22bfb2838e199e4dd031ee95adde159612dc",
+            "out/hypertest_source_101603_r2/asm_test/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.o": "2b73c9ced9e34b40701032b1d05cbcf4ffc4cb6c24403208eef2fc0a5d972c65",
+            "out/hypertest_source_101603_r2/sim_hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log": "6240e32eb2c112059b2c6e1132e4d348f465cce67c08152f2061efcc4b50f566",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.hypertest-validation.json": "e3781d145b41757c0fb4b78c3142e5cad403639520c32ab7f3eebb332cd658e7",
+            "out/hypertest_source_101603_r2/spike_sim/hypertest_case_ai_micro_backend_issuequeue_long_alu_dependency_chain_corner_1024bfce8c10_0.log": "994f61ab881d20bfff5bdb5bf27e46d3092d83fcf7ba0b2b9da665a6d5ca7635"
+          },
+          "run": "out/hypertest_source_101603_r2",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": {
+      "completed_count": 6,
+      "evidence": [
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.o",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_explicit_0.log",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.S": "1d4b369ca46e5a71f6cef6fee19b543d4389521afa389f332d15a91f27130f3a",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.o": "8a3a24b036fb4ec7fbfcaf066b7aede9caac2eb58c4a69e0282d9f5b1e647d34",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S": "1688dc46b14f1b527ffa92446769ad7964d654e36154ba2cd43a5160bc09bfb7",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o": "00db45486208ba64cd232c3df833977435755f9085a1d08caf54c37becb8df48",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S": "be4364ea208898b2274756368d7e63f6210b4f3408ec467512391e45838ea339",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o": "f451fea72f84a08c5153fd1a8ba8e12a37ed9c995de61ad43ad893674dddeebd",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_explicit_0.log": "834747cc466cc5a35e763495aea48c3cf1e7bc118a72546610da2bffcf38d2e9",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log": "ae3fa73577dae1f3993fd85dd9e2c5a01d3f3fef17476752437849e477ab8e1b",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log": "168379c744b7e667ee827aa4a095dd97393f933dd1294562bb974f382fe8d4e9",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.hypertest-validation.json": "0495613a22ee9f383081ad4db3b6f00987a4067a8836b03a845316539616768b",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.log": "b318759732df7afbe8dcfcee7bca4f36319d67d0b8df574ee0dab873a0f2a1cd",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json": "71a13025e98ca03d04e0643329c965a7ef1d5f00d6cb8c607a1ba226166d55d2",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log": "364b0451928d8df0b2295a8845ce6446cb3d0735ca1fb76286edf9f45f07e4c6",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json": "2f6f14aab64ac546a8c7e13620b2ecb6fa331c4c3552efede7ddc0ddc3c7b7c9",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log": "2b6a2da6d52ec4d98a531c90a4bb0a30dc93643388d95d0d9535a0d7bb104976",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+      },
+      "runs": [
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_explicit_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.S": "1d4b369ca46e5a71f6cef6fee19b543d4389521afa389f332d15a91f27130f3a",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_explicit_0.o": "8a3a24b036fb4ec7fbfcaf066b7aede9caac2eb58c4a69e0282d9f5b1e647d34",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_explicit_0.log": "834747cc466cc5a35e763495aea48c3cf1e7bc118a72546610da2bffcf38d2e9",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.hypertest-validation.json": "0495613a22ee9f383081ad4db3b6f00987a4067a8836b03a845316539616768b",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_explicit_0.log": "b318759732df7afbe8dcfcee7bca4f36319d67d0b8df574ee0dab873a0f2a1cd"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S": "1688dc46b14f1b527ffa92446769ad7964d654e36154ba2cd43a5160bc09bfb7",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o": "00db45486208ba64cd232c3df833977435755f9085a1d08caf54c37becb8df48",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log": "ae3fa73577dae1f3993fd85dd9e2c5a01d3f3fef17476752437849e477ab8e1b",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json": "71a13025e98ca03d04e0643329c965a7ef1d5f00d6cb8c607a1ba226166d55d2",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log": "364b0451928d8df0b2295a8845ce6446cb3d0735ca1fb76286edf9f45f07e4c6"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S": "be4364ea208898b2274756368d7e63f6210b4f3408ec467512391e45838ea339",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o": "f451fea72f84a08c5153fd1a8ba8e12a37ed9c995de61ad43ad893674dddeebd",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log": "168379c744b7e667ee827aa4a095dd97393f933dd1294562bb974f382fe8d4e9",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json": "2f6f14aab64ac546a8c7e13620b2ecb6fa331c4c3552efede7ddc0ddc3c7b7c9",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log": "2b6a2da6d52ec4d98a531c90a4bb0a30dc93643388d95d0d9535a0d7bb104976"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1,
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2,
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+          },
+          "run": "out/hypertest_random_pool_101607_r4",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": {
+      "completed_count": 7,
+      "evidence": [
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.o",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_x_deny_explicit_0.log",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.S": "491f51fb36fd110cdd2b485937650039ee20c51d6b3c85cf253810b111fd741d",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.o": "3dff3fd4018f00a57f3106b044e80253f3203587095a07175e73d36fd10e7b89",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S": "1688dc46b14f1b527ffa92446769ad7964d654e36154ba2cd43a5160bc09bfb7",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o": "00db45486208ba64cd232c3df833977435755f9085a1d08caf54c37becb8df48",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S": "be4364ea208898b2274756368d7e63f6210b4f3408ec467512391e45838ea339",
+        "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o": "f451fea72f84a08c5153fd1a8ba8e12a37ed9c995de61ad43ad893674dddeebd",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_x_deny_explicit_0.log": "8fd3244a7aee2cc618b86e3bcc54b70e11e313a816a045b2e58978d9c476f35c",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log": "ae3fa73577dae1f3993fd85dd9e2c5a01d3f3fef17476752437849e477ab8e1b",
+        "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log": "168379c744b7e667ee827aa4a095dd97393f933dd1294562bb974f382fe8d4e9",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.hypertest-validation.json": "d7a7581b7239e4d0c1619f0ba8d72773058ceb9ba1af87fdcd442e581bf7baf1",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.log": "e21552dda3078bed6a52f60ae4b0d716db54db0e22438ff7089d9f86c9691f9f",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json": "71a13025e98ca03d04e0643329c965a7ef1d5f00d6cb8c607a1ba226166d55d2",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log": "364b0451928d8df0b2295a8845ce6446cb3d0735ca1fb76286edf9f45f07e4c6",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json": "2f6f14aab64ac546a8c7e13620b2ecb6fa331c4c3552efede7ddc0ddc3c7b7c9",
+        "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log": "2b6a2da6d52ec4d98a531c90a4bb0a30dc93643388d95d0d9535a0d7bb104976",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+      },
+      "runs": [
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_x_deny_explicit_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.S": "491f51fb36fd110cdd2b485937650039ee20c51d6b3c85cf253810b111fd741d",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_canonical_x_deny_explicit_0.o": "3dff3fd4018f00a57f3106b044e80253f3203587095a07175e73d36fd10e7b89",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_canonical_x_deny_explicit_0.log": "8fd3244a7aee2cc618b86e3bcc54b70e11e313a816a045b2e58978d9c476f35c",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.hypertest-validation.json": "d7a7581b7239e4d0c1619f0ba8d72773058ceb9ba1af87fdcd442e581bf7baf1",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_canonical_x_deny_explicit_0.log": "e21552dda3078bed6a52f60ae4b0d716db54db0e22438ff7089d9f86c9691f9f"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.S": "1688dc46b14f1b527ffa92446769ad7964d654e36154ba2cd43a5160bc09bfb7",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_mixed_restricted_smoke_0.o": "00db45486208ba64cd232c3df833977435755f9085a1d08caf54c37becb8df48",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_mixed_restricted_smoke_0.log": "ae3fa73577dae1f3993fd85dd9e2c5a01d3f3fef17476752437849e477ab8e1b",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.hypertest-validation.json": "71a13025e98ca03d04e0643329c965a7ef1d5f00d6cb8c607a1ba226166d55d2",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_mixed_restricted_smoke_0.log": "364b0451928d8df0b2295a8845ce6446cb3d0735ca1fb76286edf9f45f07e4c6"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.S": "be4364ea208898b2274756368d7e63f6210b4f3408ec467512391e45838ea339",
+            "out/hypertest_native_all_101602_r4/asm_test/hypertest_sv48_random_smoke_0.o": "f451fea72f84a08c5153fd1a8ba8e12a37ed9c995de61ad43ad893674dddeebd",
+            "out/hypertest_native_all_101602_r4/sim_hypertest_sv48_random_smoke_0.log": "168379c744b7e667ee827aa4a095dd97393f933dd1294562bb974f382fe8d4e9",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.hypertest-validation.json": "2f6f14aab64ac546a8c7e13620b2ecb6fa331c4c3552efede7ddc0ddc3c7b7c9",
+            "out/hypertest_native_all_101602_r4/spike_sim/hypertest_sv48_random_smoke_0.log": "2b6a2da6d52ec4d98a531c90a4bb0a30dc93643388d95d0d9535a0d7bb104976"
+          },
+          "run": "out/hypertest_native_all_101602_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1,
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2,
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+          },
+          "run": "out/hypertest_random_pool_101607_r4",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": {
+      "completed_count": 3,
+      "evidence": [
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.S",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.o",
+        "out/hypertest_representative_101605/sim_hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.hypertest-validation.json",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+        "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+        "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+        "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.S": "af5c8931f87a3817a801fa68bbf5637342096355ed7dd182cdcbbb53a311a780",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.o": "2b5bcc8fb15c00354f037e607da07962b88a428b295bfeb9ee38feef86034e06",
+        "out/hypertest_representative_101605/sim_hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log": "c9eed24dedc94b14d431ccfd4285bcafe6414c0af37c167a1eb2472dfdcc328b",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.hypertest-validation.json": "9eda158b7a3c3742d91ca9d8fcc8f6be415b734275fcf62135e36ac2979b5e86",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log": "671f168f53caecbe09c36836f9b894b555f0e728a146e99d4133d60e031591d7"
+      },
+      "runs": [
+        {
+          "basis": "injection_intervals",
+          "case_hits": {
+            "ai_arch_scalar_illegal_field_encoding_matrix_corner": 1,
+            "ai_micro_backend_issuequeue_long_alu_dependency_chain_corner": 2,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner": 1,
+            "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner": 2,
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 2
+          },
+          "evidence": [
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.S": "60b4184f7a6b9bd9d376f925641a5cc18a086a5d5cf4c418e815e1bb81d82dca",
+            "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_smoke_0.o": "f1910e1e4fcf35b8a9616b001db85bee426c25e9d90d06e2ba517223f82d3fa0",
+            "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_smoke_0.log": "04a391a6aaee79e073f2a7e86bec85adf97854cc2ef77074690f034a7657905d",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.hypertest-validation.json": "56262bfa9b9ca904c449b0082fef6452a71dd0d6e1e7e33ca1fd50b46a63e4f7",
+            "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_smoke_0.log": "e34fdc8d87b864486a6f786a329a8bf3e39038d9477e8f1ec43d4e3f56836008"
+          },
+          "run": "out/hypertest_random_pool_101607_r4",
+          "validation": "gen_gcc_spike_pass"
+        },
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner": 1
+          },
+          "evidence": [
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.S",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.o",
+            "out/hypertest_representative_101605/sim_hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.hypertest-validation.json",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.S": "af5c8931f87a3817a801fa68bbf5637342096355ed7dd182cdcbbb53a311a780",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.o": "2b5bcc8fb15c00354f037e607da07962b88a428b295bfeb9ee38feef86034e06",
+            "out/hypertest_representative_101605/sim_hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log": "c9eed24dedc94b14d431ccfd4285bcafe6414c0af37c167a1eb2472dfdcc328b",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.hypertest-validation.json": "9eda158b7a3c3742d91ca9d8fcc8f6be415b734275fcf62135e36ac2979b5e86",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_ai_micro_m_nested_exception_inside_mtvec_handler_recovers_corner_dce82b71a3d2_0.log": "671f168f53caecbe09c36836f9b894b555f0e728a146e99d4133d60e031591d7"
+          },
+          "run": "out/hypertest_representative_101605",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "test_sv39_mode": {
+      "completed_count": 1,
+      "evidence": [
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.S",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.o",
+        "out/hypertest_representative_101605/sim_hypertest_case_test_sv39_mode_5637cf558125_0.log",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.hypertest-validation.json",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.S": "24b4c6a2903960b085b86ee9b4e5a147a3ee835e97bc6bb41b3b0c10f0ccca3e",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.o": "fefc9a1437e0b04920f9a0fbbbaec5c6996f3794d32d6ef6f7b0b149728da107",
+        "out/hypertest_representative_101605/sim_hypertest_case_test_sv39_mode_5637cf558125_0.log": "db30ff874b5fb1e2a35526929adc90bdd9911b19db90521d545f8a8c1e5ec19b",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.hypertest-validation.json": "8025ffe5d8686e9233fde2e14e2322a2c0b5c486686c72c146f79382bf730c0b",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.log": "3679c93fcb52c88197aaeecc5fc3cb35c2aa8273352198d3f4fb2f2f4bf76714"
+      },
+      "runs": [
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "test_sv39_mode": 1
+          },
+          "evidence": [
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.S",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.o",
+            "out/hypertest_representative_101605/sim_hypertest_case_test_sv39_mode_5637cf558125_0.log",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.hypertest-validation.json",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.S": "24b4c6a2903960b085b86ee9b4e5a147a3ee835e97bc6bb41b3b0c10f0ccca3e",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv39_mode_5637cf558125_0.o": "fefc9a1437e0b04920f9a0fbbbaec5c6996f3794d32d6ef6f7b0b149728da107",
+            "out/hypertest_representative_101605/sim_hypertest_case_test_sv39_mode_5637cf558125_0.log": "db30ff874b5fb1e2a35526929adc90bdd9911b19db90521d545f8a8c1e5ec19b",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.hypertest-validation.json": "8025ffe5d8686e9233fde2e14e2322a2c0b5c486686c72c146f79382bf730c0b",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv39_mode_5637cf558125_0.log": "3679c93fcb52c88197aaeecc5fc3cb35c2aa8273352198d3f4fb2f2f4bf76714"
+          },
+          "run": "out/hypertest_representative_101605",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "test_sv48_mode": {
+      "completed_count": 1,
+      "evidence": [
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.S",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.o",
+        "out/hypertest_representative_101605/sim_hypertest_case_test_sv48_mode_c19f070fa402_0.log",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.hypertest-validation.json",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.S": "69be74c7916912029f271e674155c2db374956a412f0c3b079978f3a2e0afc62",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.o": "92ed0948f1bbd5e93cd18bfa4cd5a97b68216a70ff32384d91da3f0a4630f5f2",
+        "out/hypertest_representative_101605/sim_hypertest_case_test_sv48_mode_c19f070fa402_0.log": "2910507c771e93fae3bbd86e151a986dc0ba996c21dc4161609cc24ea0400a28",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.hypertest-validation.json": "ad0a539c6c8f147db541261d91165c36c6d824bca72288bc834f865c59b26fcd",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.log": "65c3e85a81e91afe31e3dd500a6a1e9ebc59d65746e13389cb1cba3b98bc188b"
+      },
+      "runs": [
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "test_sv48_mode": 1
+          },
+          "evidence": [
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.S",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.o",
+            "out/hypertest_representative_101605/sim_hypertest_case_test_sv48_mode_c19f070fa402_0.log",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.hypertest-validation.json",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.S": "69be74c7916912029f271e674155c2db374956a412f0c3b079978f3a2e0afc62",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_test_sv48_mode_c19f070fa402_0.o": "92ed0948f1bbd5e93cd18bfa4cd5a97b68216a70ff32384d91da3f0a4630f5f2",
+            "out/hypertest_representative_101605/sim_hypertest_case_test_sv48_mode_c19f070fa402_0.log": "2910507c771e93fae3bbd86e151a986dc0ba996c21dc4161609cc24ea0400a28",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.hypertest-validation.json": "ad0a539c6c8f147db541261d91165c36c6d824bca72288bc834f865c59b26fcd",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_test_sv48_mode_c19f070fa402_0.log": "65c3e85a81e91afe31e3dd500a6a1e9ebc59d65746e13389cb1cba3b98bc188b"
+          },
+          "run": "out/hypertest_representative_101605",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    },
+    "time_test_1": {
+      "completed_count": 1,
+      "evidence": [
+        "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.S",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.o",
+        "out/hypertest_representative_101605/sim_hypertest_case_time_test_1_87a116b229e3_0.log",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.hypertest-validation.json",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.log"
+      ],
+      "evidence_sha256": {
+        "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.S": "43c48c6fdfe63f96dea54b8d365adf202d3777663a4fe55466d615ce3550d021",
+        "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.o": "2257ca96dfa2b620f1ffcbb919828aa75493fe6f404f896df91def2e721e51ad",
+        "out/hypertest_representative_101605/sim_hypertest_case_time_test_1_87a116b229e3_0.log": "eafa49e8c9ede3b6af9567987b45d82d5fa00c80b73e755c91c7d01a3aee2c98",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.hypertest-validation.json": "6d3b2ddaea6c232bc52f3de130fe4bb8886f69f5c501967f2ab8784411ac9279",
+        "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.log": "fec432b05920aa4bfa69c90b8f369ab582611236aba004715ac2dbe6b995e1a8"
+      },
+      "runs": [
+        {
+          "basis": "legacy_source_intervals",
+          "case_hits": {
+            "time_test_1": 1
+          },
+          "evidence": [
+            "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.S",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.o",
+            "out/hypertest_representative_101605/sim_hypertest_case_time_test_1_87a116b229e3_0.log",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.hypertest-validation.json",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.log"
+          ],
+          "evidence_sha256": {
+            "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.S": "43c48c6fdfe63f96dea54b8d365adf202d3777663a4fe55466d615ce3550d021",
+            "out/hypertest_representative_101605/asm_test/hypertest_case_time_test_1_87a116b229e3_0.o": "2257ca96dfa2b620f1ffcbb919828aa75493fe6f404f896df91def2e721e51ad",
+            "out/hypertest_representative_101605/sim_hypertest_case_time_test_1_87a116b229e3_0.log": "eafa49e8c9ede3b6af9567987b45d82d5fa00c80b73e755c91c7d01a3aee2c98",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.hypertest-validation.json": "6d3b2ddaea6c232bc52f3de130fe4bb8886f69f5c501967f2ab8784411ac9279",
+            "out/hypertest_representative_101605/spike_sim/hypertest_case_time_test_1_87a116b229e3_0.log": "fec432b05920aa4bfa69c90b8f369ab582611236aba004715ac2dbe6b995e1a8"
+          },
+          "run": "out/hypertest_representative_101605",
+          "validation": "gen_gcc_spike_pass"
+        }
+      ],
+      "validation": "gen_gcc_spike_pass"
+    }
+  },
+  "claims": "Completed generator/GNU/Spike selfchecks only; no RTL, external stimulus, or unexecuted-case coverage claim.",
+  "counts": {
+    "bridge_selftests": 1,
+    "catalog_cases": 4636,
+    "legacy_checks": 2,
+    "rejected_artifacts": 0,
+    "validated_cases": 9
+  },
+  "evidence_path_base": "riscv-dv repository",
+  "input_directories": [
+    "out/hypertest_bridge_101604_r4",
+    "out/hypertest_legacy_101606_r2",
+    "out/hypertest_native_all_101602_r4",
+    "out/hypertest_random_pool_101607_r4",
+    "out/hypertest_representative_101605",
+    "out/hypertest_source_101603_r2"
+  ],
+  "rejected_artifacts": [],
+  "schema_version": 1,
+  "source_snapshot_sha256": "51e6272f6002582bdde9dcd26f6229bf2ab7835d754535956feffd2d85477d07",
+  "supplementary_checks": {
+    "bridge_selftest": [
+      {
+        "basis": "legacy_source_intervals",
+        "case_hits": {
+          "dv_hypertest_selftest_clobber_case": 2
+        },
+        "counts_as_migrated_case": false,
+        "evidence": [
+          "out/hypertest_bridge_101604_r4/directed_asm_test/bridge_selftest_main.o",
+          "out/hypertest_bridge_101604_r4/spike_sim/bridge_selftest_main.hypertest-validation.json",
+          "out/hypertest_bridge_101604_r4/spike_sim/bridge_selftest_main.log",
+          "src/hypertest/bridge_selftest_main.S"
+        ],
+        "evidence_sha256": {
+          "out/hypertest_bridge_101604_r4/directed_asm_test/bridge_selftest_main.o": "99b55e50629147b965606facd9d31fdcdfea9443d0d4655247427670b97ffc56",
+          "out/hypertest_bridge_101604_r4/spike_sim/bridge_selftest_main.hypertest-validation.json": "edba290029eafbe849a5c6bea7456a8a155fe50f6172a2c03c63ffa75cfe1bde",
+          "out/hypertest_bridge_101604_r4/spike_sim/bridge_selftest_main.log": "5e71baeb29e07f6b41b2c4c98132f0ea85c222e20c144b6555685eea7224b18a",
+          "src/hypertest/bridge_selftest_main.S": "bb9a86662eb2e35c2d1a4be1008f9144bab08c3b3330f963c7751ef2dae50191"
+        },
+        "run": "out/hypertest_bridge_101604_r4",
+        "validation": "gcc_spike_pass"
+      }
+    ],
+    "legacy": [
+      {
+        "basis": "normal_DV_write_tohost_execution",
+        "counts_as_migrated_case": false,
+        "evidence": [
+          "out/hypertest_legacy_101606_r2/asm_test/riscv_arithmetic_basic_test_0.S",
+          "out/hypertest_legacy_101606_r2/asm_test/riscv_arithmetic_basic_test_0.o",
+          "out/hypertest_legacy_101606_r2/sim_riscv_arithmetic_basic_test_0.log",
+          "out/hypertest_legacy_101606_r2/spike_sim/riscv_arithmetic_basic_test_0.log"
+        ],
+        "evidence_sha256": {
+          "out/hypertest_legacy_101606_r2/asm_test/riscv_arithmetic_basic_test_0.S": "9a490da075b7f744dd94f0dcfd1c7aae9efa96aac454a238c977ff957d69e6ee",
+          "out/hypertest_legacy_101606_r2/asm_test/riscv_arithmetic_basic_test_0.o": "6b60da9044e3f8f88adbf2e83ae6989ecac8586689677c0cc1f8467b865582ba",
+          "out/hypertest_legacy_101606_r2/sim_riscv_arithmetic_basic_test_0.log": "1a96d76580f592338d75aef92529385451ce4e17c0dd072c09eec2857efd969e",
+          "out/hypertest_legacy_101606_r2/spike_sim/riscv_arithmetic_basic_test_0.log": "ad024b6ac388bf0e3f8e526bd68723d065a2143007be3a0c4138ce6b1e28f0a3"
+        },
+        "run": "out/hypertest_legacy_101606_r2",
+        "test": "riscv_arithmetic_basic_test_0",
+        "validation": "gen_gcc_spike_pass"
+      },
+      {
+        "basis": "normal_DV_write_tohost_execution",
+        "counts_as_migrated_case": false,
+        "evidence": [
+          "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_disabled_0.S",
+          "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_disabled_0.o",
+          "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_disabled_0.log",
+          "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_disabled_0.log"
+        ],
+        "evidence_sha256": {
+          "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_disabled_0.S": "574157e07fb13b61aac1cbf69acf8937c360bf2240e5e8e6743a6fb61b178497",
+          "out/hypertest_random_pool_101607_r4/asm_test/hypertest_random_pool_disabled_0.o": "2c51f1ba26b4995b1bc49f9e37d88a42496e86211d8c07ccda640ff15ce02a3d",
+          "out/hypertest_random_pool_101607_r4/sim_hypertest_random_pool_disabled_0.log": "4954d1f32b95bd24855368c8f6ed2cd9ac184571abde8734d2768ee423a925d6",
+          "out/hypertest_random_pool_101607_r4/spike_sim/hypertest_random_pool_disabled_0.log": "42963affa89af4ea23f58ab25f18569d9eee35541503eb4b0b5d8cf62c406c6c"
+        },
+        "run": "out/hypertest_random_pool_101607_r4",
+        "test": "hypertest_random_pool_disabled_0",
+        "validation": "gen_gcc_spike_pass"
+      }
+    ]
+  }
+}
