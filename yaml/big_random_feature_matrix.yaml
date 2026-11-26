@@ -1,0 +1,270 @@
+# Large-random feature matrix. Select exactly one entry with --test.
+# instr_cnt counts base instructions; directed streams add more instructions.
+# The random profiles have different boot and handler requirements:
+#   - Hypertest requires RV64 Sv48 and fixed M-mode boot, and conflicts with PMP.
+#   - PMP injection requires a target with support_pmp=1 and S/U-mode boot.
+#   - Native process switches require fixed M boot and no async IRQ/NMI.
+# Current NanHu V5.1 has support_pmp=0, so the PMP entry is a disabled
+# reference for a separately validated PMP-capable custom target.
+# Always run with --steps gen,gcc_compile,iss_sim --iss spike. The Hypertest
+# entry additionally requires --cmp_opts '+define+NANHU_V5_1_SV48'.
+# Hypertest pools below are explicit paths relative to the riscv-dv repo root.
+# With restrict_store_to_data=1, keep only store-safe native cases in the pool.
+
+- test: nanhu_big_random_process_switch
+  description: >
+    One thousand base instructions mixed with native two-process context
+    switches and ordinary bounded directed streams. Requires RV64 Sv39/Sv48,
+    fixed M boot and no asynchronous IRQ/NMI injection.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  min_process_switch_hits: 1
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_random_boot_mode=0
+    +enable_interrupt=0
+    +enable_nanhu_nmi_handler=0
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=0
+    +directed_instr_0=riscv_process_switch_stream,2
+    +directed_instr_1=riscv_int_numeric_corner_stream,4
+    +directed_instr_2=riscv_load_store_rand_instr_stream,4
+    +restrict_store_to_data=1
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+
+- test: nanhu_big_random_boot_directed
+  description: >
+    Approximately 10k base instructions with random directed streams and
+    M/S/U boot selection; random stores are confined to writable data.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=5
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=20
+    +enable_random_boot_mode=1
+    +restrict_store_to_data=1
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+# Closed-server forward-progress stress: LinkNan NMI_31/NMI_43 enter through
+# direct MTVEC and return through MNEPC/MNRET. The server must deassert a
+# level-triggered MEI (or provide a real claim/complete MMIO address); this
+# template deliberately contains no guessed platform MMIO addresses. This is
+# not a lossless asynchronous-interrupt architectural test: the opt-in return
+# policy intentionally skips the interrupted 16/32-bit instruction.
+- test: nanhu_big_random_irq_nmi_forward_progress
+  description: >
+    Approximately 1k base M-mode random instructions with ordinary branches and
+    random directed streams. Enables M external interrupts and LinkNan Smrnmi
+    NMI_31/NMI_43 handling at direct MTVEC. MIE/MEIE and runtime state are
+    initialized before NMIE is enabled; the server must clear MEI before
+    MRET. The optional EPC advance intentionally skips one instruction.
+    Hypertest is disabled because source cases can replace MTVEC.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=5000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_random_boot_mode=0
+    +no_delegation=1
+    +enable_interrupt=1
+    +randomize_csr=0
+    +enable_dummy_csr_write=0
+    +enable_timer_irq=0
+    +enable_nanhu_nmi_handler=1
+    +advance_async_epc=1
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=0
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=5
+    +enable_random_hypertest=0
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+  iss_isa: rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei_zicntr_zihpm_smstateen_sscofpmf_sstc_svade_svinval_svpbmt_smrnmi
+
+- test: nanhu_big_random_hypertest
+  description: >
+    Approximately 10k base instructions with random directed streams and
+    random Hypertest injections. Ordinary random branches are disabled here
+    to keep every injection reachable. Fixed M boot, Sv48 and full RV64
+    floating-point/vector bridge state are required. The pool includes
+    source Hypertest cases.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=3
+    +hypertest_case_file=src/hypertest/case_names_random_cosim_on.txt
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+# This batch entry draws from the six individually Spike-validated candidates.
+# The full cosim-on inventory is still selectable via the branch_mix entry
+# below, but most of its source cases lack integrated Spike evidence.
+- test: nanhu_big_random_hypertest_branch_mix_reviewed
+  description: >
+    Approximately 10k base instructions with ordinary random branches,
+    bounded directed streams and random Hypertest injections selected from
+    the reviewed six-case pool. Fixed M boot and Sv48 are required.
+  iterations: 1
+  min_hypertest_hits: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1500
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=0
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=3
+    +hypertest_case_file=src/hypertest/case_names_random.txt
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+# Base B/J instructions do not depend on any CFI extension. Forward branches
+# can skip an atomic Hypertest stream, so this entry requires at least one
+# executed injection per ELF and records any others as skipped in the Spike
+# validation JSON. Use the entry above when every injection must be reached.
+- test: nanhu_big_random_hypertest_branch_mix
+  description: >
+    Approximately 10k base instructions with ordinary random branches,
+    bounded loop/JAL directed streams and random source Hypertest injections.
+    Fixed M boot, Sv48, full RV64 floating-point/vector bridge state and at
+    least one executed Hypertest injection are required.
+  iterations: 1
+  min_hypertest_hits: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=0
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=3
+    +hypertest_case_file=src/hypertest/case_names_random_cosim_on.txt
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+# Source Hypertest cases may intentionally modify code. This separate, disabled
+# reference only restricts DV-generated stores; it does not certify the full
+# cosim-on pool for NanHu, standalone Spike, repeated mixing or RTL cosim.
+# Copy the entry and set iterations > 0 only after selecting/reviewing suitable
+# source cases and their ISA/platform/bridge dependencies.
+- test: nanhu_big_random_hypertest_cosim_on_scoped_reference
+  description: >
+    Reference configuration for drawing from the full cosim-on superset while
+    restricting DV-generated stores. Source Hypertest writes retain their
+    original behavior, including intentional self-modifying code.
+  iterations: 0
+  min_hypertest_hits: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=0
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=3
+    +hypertest_case_file=src/hypertest/case_names_random_cosim_on.txt
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+
+# Do not run this entry with --target nanhu_v5_1. To use it, first create
+# and validate a separate RV64 Sv39 target with support_pmp=1, then change
+# iterations to a positive value in a copy of this file. --iterations cannot
+# revive an entry whose YAML iterations is zero.
+- test: rv64_pmp_big_random_reference
+  description: >
+    PMP-capable target only: random directed streams and one randomly chosen
+    load/store PMP permission fault, with S-mode boot and M-mode recovery.
+  iterations: 0
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=10000
+    +num_of_sub_program=2
+    +boot_mode=s
+    +no_delegation=1
+    +enable_floating_point=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_pmp_exception=1
+    +restrict_store_to_data=1
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d

@@ -4,6 +4,23 @@
 boot mode，以及 PMP 随机权限异常注入。三项功能默认均关闭，因此不带新选项的
 现有 testlist 保持原有行为。
 
+限制随机/定向 stream 写入代码段的 `+restrict_store_to_data=1` 选项见
+[store 地址限制说明](restrict-store-to-data.md)。它可以与随机 directed 注入组合使用。
+仅约束 DV 生成器写地址、允许导入 Hypertest C/ASM 保留原写入时，使用独立的
+`+restrict_generated_store_to_data=1`；它不代表运行时绝不写代码，详见同一说明。
+
+全量 hypertest 用例接入及其独立开关 `+enable_random_hypertest=1` 见
+[hypertest 定向流说明](hypertest-directed-streams.md) 和
+[逐用例迁移报告](hypertest-migration-report.md)。它不依赖普通随机 directed 开关。
+
+NanHu 封闭服务器的 MEI/NMI 随机注入模板与 handler 配置见
+[中断/NMI 大随机模板](nanhu-irq-nmi-random.md)。
+
+原生进程切换自检通过现有
+`+directed_instr_0=riscv_process_switch_stream,1` 选择，详见
+[进程切换 corner 分析与模板](process-switch-corners.md)。该模板检查 A→B→A、
+返回 PC、任务状态和地址空间隔离，当前与 IRQ/NMI 注入模板分开运行。
+
 ## 1. 选项总览
 
 | 功能 | `gen_opts` 主选项 | 别名 | 默认值 |

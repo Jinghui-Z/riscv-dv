@@ -1,0 +1,42 @@
+# LinkNan/NanHu long random generation pair. Run one entry at a time or select
+# both entries for a side-by-side pair with the same fixed seed.
+
+- test: linknan_nanhu_v5_1_100k_restricted
+  description: >
+    100k-instruction NanHu random case with random directed streams, random
+    boot privilege and store addresses confined to generated writable data.
+  iterations: 10
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=100000
+    +num_of_sub_program=2
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=20
+    +enable_random_boot_mode=1
+    +restrict_store_to_data=1
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+- test: linknan_nanhu_v5_1_100k_unrestricted
+  description: >
+    100k-instruction NanHu random case with random directed streams and random
+    boot privilege, retaining the legacy unrestricted store behavior.
+  iterations: 10
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=100000
+    +num_of_sub_program=2
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=20
+    +enable_random_boot_mode=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
