@@ -63,6 +63,11 @@ class riscv_mem_access_stream(riscv_directed_instr_stream):
         else:
             self.data_page.extend(cfg.mem_region)
         self.max_data_page_id = len(self.data_page)
+        if cfg.restrict_dv_store_to_data:
+            if cfg.no_data_page or not self.max_data_page_id:
+                raise ValueError('restrict_store_to_data: memory stream requires data pages')
+            if any(int(region.size_in_bytes) <= 0 for region in self.data_page):
+                raise ValueError('restrict_store_to_data: data region must be nonempty')
 
     # Use "la" instruction to initialize the base regiseter
     def add_rs1_init_la_instr(self, gpr, idx, base = 0):

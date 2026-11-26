@@ -71,7 +71,18 @@ class riscv_data_page_gen extends uvm_object;
                                 mem_region_setting[i].name,
                                 mem_region_setting[i].size_in_bytes,
                                 mem_region_setting[i].xwr), UVM_LOW)
-      if (amo) begin
+      if (cfg.restrict_dv_stores_to_data()) begin
+        // All random write targets have a dedicated input-section namespace.
+        // Page alignment also contains cache-block writes and avoids sharing
+        // a translation page with executable instructions.
+        string data_label;
+        data_label = amo ? mem_region_setting[i].name :
+                          {hart_prefix(hart_id), mem_region_setting[i].name};
+        data_page_str.push_back($sformatf("%0s .dv_store_data.%0s,\"aw\",@progbits;",
+            cfg.use_push_data_section ? ".pushsection" : ".section", data_label));
+        data_page_str.push_back(".balign 4096");
+        data_page_str.push_back({data_label, ":"});
+      end else if (amo) begin
         if (cfg.use_push_data_section) begin
           data_page_str.push_back($sformatf(".pushsection .%0s,\"aw\",@progbits;",
                                             mem_region_setting[i].name));

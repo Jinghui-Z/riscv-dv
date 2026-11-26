@@ -179,6 +179,8 @@ class riscv_instr_gen_config:
         # Options to turn off some specific types of instructions
         self.no_branch_jump = self.argv.no_branch_jump  # No branch/jump instruction
         self.no_load_store = self.argv.no_load_store  # No load/store instruction
+        self.restrict_store_to_data = self.argv.restrict_store_to_data
+        self.restrict_generated_store_to_data = self.argv.restrict_generated_store_to_data
         self.no_csr_instr = self.argv.no_csr_instr  # No csr instruction
         self.no_ebreak = self.argv.no_ebreak  # No ebreak instruction
         self.no_dret = self.argv.no_dret  # No dret instruction
@@ -217,6 +219,12 @@ class riscv_instr_gen_config:
         self.no_directed_instr = self.argv.no_directed_instr
         self.enable_random_directed_instr = self.argv.enable_random_directed_instr
         self.random_directed_instr_ratio = self.argv.random_directed_instr_ratio
+        self.enable_random_hypertest = self.argv.enable_random_hypertest
+        self.random_hypertest_ratio = self.argv.random_hypertest_ratio
+        if self.enable_random_hypertest:
+            raise ValueError(
+                "enable_random_hypertest is supported only by the SystemVerilog backend; "
+                "PyFlow does not implement the Sv48 page tables and local trap handlers")
         self.asm_test_suffix = self.argv.asm_test_suffix
         # Enable interrupt bit in MSTATUS (MIE, SIE, UIE)
         self.enable_interrupt = self.argv.enable_interrupt
@@ -539,10 +547,23 @@ class riscv_instr_gen_config:
     def get_non_reserved_gpr(self):
         pass
 
+    @property
+    def restrict_dv_store_to_data(self):
+        """Bound DV-generated writes for either the strict or scoped policy."""
+        return bool(self.restrict_store_to_data or
+                    self.restrict_generated_store_to_data)
+
     def post_randomize(self):
         self.init_privileged_mode = privileged_mode_t(self.init_privil_mode)
         # Setup the list all reserved registers
         self.reserved_regs.extend((self.tp, self.sp, self.scratch_reg))
+        if self.restrict_dv_store_to_data:
+            # These values feed later stack/trap/PMP stores. Directed streams
+            # must not turn a saved runtime address into an arbitrary pointer.
+            for reg in list(self.gpr) + [self.ra, self.pmp_reg, riscv_reg_t.SP,
+                                         riscv_reg_t.TP, riscv_reg_t.GP]:
+                if reg not in self.reserved_regs:
+                    self.reserved_regs.append(reg)
         # Need to save all loop registers, and RA/T0
         self.min_stack_len_per_program = 2 * (rcs.XLEN // 8)
         logging.info("min_stack_len_per_program value = {}"
@@ -638,6 +659,12 @@ class riscv_instr_gen_config:
                            choices = [0, 1], type = int, default = 0)
         parse.add_argument('--no_load_store', help = 'no_load_store',
                            choices = [0, 1], type = int, default = 0)
+        parse.add_argument('--restrict_store_to_data',
+                           help = 'bound stores to generated data regions; reject unsafe streams',
+                           choices = [0, 1], type = int, default = 0)
+        parse.add_argument('--restrict_generated_store_to_data',
+                           help = 'bound DV-generated stores; imported source cases are SV-only',
+                           choices = [0, 1], type = int, default = 0)
         parse.add_argument('--no_csr_instr', help = 'no_csr_instr',
                            choices = [0, 1], type = int, default = 0)
         parse.add_argument('--fix_sp', help = 'fix_sp',
@@ -666,6 +693,12 @@ class riscv_instr_gen_config:
                            choices = [0, 1], type = int, default = 0)
         parse.add_argument('--random_directed_instr_ratio',
                            help = 'total random directed stream insertions per 1000 instructions',
+                           choices = range(0, 1001), type = int, default = 4)
+        parse.add_argument('--enable_random_hypertest',
+                           help = 'inject ported hypertest streams (SystemVerilog backend only)',
+                           choices = [0, 1], type = int, default = 0)
+        parse.add_argument('--random_hypertest_ratio',
+                           help = 'ported hypertest stream insertions per 1000 instructions',
                            choices = range(0, 1001), type = int, default = 4)
         parse.add_argument('--no_fence', help = 'no_fence',
                            choices = [0, 1], type = int, default = 1)

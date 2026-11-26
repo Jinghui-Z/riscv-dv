@@ -59,11 +59,29 @@ class riscv_mem_access_stream extends riscv_directed_instr_stream;
       data_page = cfg.mem_region;
     end
     max_data_page_id = data_page.size();
+    if (cfg.restrict_dv_stores_to_data()) begin
+      if (cfg.no_data_page || (max_data_page_id == 0)) begin
+        `uvm_fatal(`gfn, "+restrict_store_to_data requires generated data for memory streams")
+      end
+      if (load_store_shared_memory && !(RV32A inside {supported_isa})) begin
+        `uvm_fatal(`gfn, "Restricted shared-memory stream requires emitted AMO data (RV32A)")
+      end
+      foreach (data_page[i]) begin
+        if ((data_page[i].size_in_bytes == 0) || !data_page[i].xwr[1]) begin
+          `uvm_fatal(`gfn, $sformatf("Invalid writable data region %0s", data_page[i].name))
+        end
+      end
+    end
   endfunction
 
   // Use "la" instruction to initialize the base regiseter
   virtual function void add_rs1_init_la_instr(riscv_reg_t gpr, int id, int base = 0);
     riscv_pseudo_instr la_instr;
+    if (cfg.restrict_dv_stores_to_data() &&
+        ((id < 0) || (id >= data_page.size()) || (base < 0) ||
+         (base >= data_page[id].size_in_bytes) || (gpr inside {cfg.reserved_regs, ZERO}))) begin
+      `uvm_fatal(`gfn, "Restricted memory stream has an invalid data base or runtime register")
+    end
     la_instr = riscv_pseudo_instr::type_id::create("la_instr");
     la_instr.pseudo_instr_name = LA;
     la_instr.rd = gpr;

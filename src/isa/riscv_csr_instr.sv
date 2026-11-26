@@ -83,6 +83,23 @@ class riscv_csr_instr extends riscv_instr;
     include_reg.delete();
     exclude_reg.delete();
 
+    if (cfg.restrict_dv_stores_to_data()) begin
+      // Random SATP/status/trap-vector writes can invalidate the address and
+      // control-flow assumptions of otherwise bounded memory streams. Keep
+      // random CSR traffic on scratch CSRs; explicit program setup is intact.
+      // The trap stack in this generator lives in cfg.tp, not xSCRATCH.
+      case (cfg.init_privileged_mode)
+        MACHINE_MODE:    include_reg = {MSCRATCH};
+        SUPERVISOR_MODE: include_reg = {SSCRATCH};
+        default:         include_reg = {USCRATCH};
+      endcase
+      include_write_reg = include_reg;
+      allow_ro_write = 0;
+      `uvm_info("restrict_store_to_data",
+                "Random CSR accesses restricted to scratch to preserve memory mappings", UVM_LOW)
+      return;
+    end
+
     allow_ro_write = 1;
 
     if (cfg.enable_illegal_csr_instruction) begin

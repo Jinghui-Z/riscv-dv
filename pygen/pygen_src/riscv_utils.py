@@ -110,7 +110,18 @@ def get_random_directed_instr_stream_names():
                   if is_random_directed_instr_stream_supported(name))
 
 
+def validate_restricted_directed_stream(name):
+    """Fail closed for streams without a proven bounded-store implementation.
+
+    PyFlow AMO/LRSC still has TODO base-operand constraints; the SV backend
+    supports those streams, but accepting them here would give false safety.
+    """
+    if cfg.restrict_dv_store_to_data and name not in _PYFLOW_RANDOM_DIRECTED_INSTR_STREAM_NAMES:
+        raise ValueError('restrict_store_to_data: unsupported pyflow stream {}'.format(name))
+
+
 def factory(obj_of):
+    validate_restricted_directed_stream(obj_of)
     objs = _DIRECTED_INSTR_STREAM_FACTORY
 
     try:

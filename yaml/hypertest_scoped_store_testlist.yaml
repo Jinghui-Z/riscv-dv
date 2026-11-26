@@ -1,0 +1,31 @@
+# Scoped store control: bound DV-generated writes but retain source Hypertest
+# C/ASM semantics. Use NanHu Sv48 generator mode and complete Spike validation.
+- test: hypertest_scoped_generated_store_smoke
+  description: >
+    Exercise the generated-store-only restriction with an already Spike-validated
+    source Hypertest case. This does not certify arbitrary source cases or RTL cosim.
+  iterations: 1
+  min_hypertest_hits: 1
+  gen_test: riscv_restrict_generated_store_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=1
+    +hypertest_case_names=ai_micro_backend_issuequeue_long_alu_dependency_chain_corner
+    +restrict_generated_store_to_data=1
+    +restrict_store_to_data=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d

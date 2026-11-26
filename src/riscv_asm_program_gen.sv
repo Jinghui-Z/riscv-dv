@@ -49,6 +49,10 @@ class riscv_asm_program_gen extends uvm_object;
    int unsigned                        directed_instr_stream_ratio[string];
    riscv_page_table_list#(SATP_MODE)   page_table_list;
    int                                 hart;
+   // The Hypertest bridge links one page-table implementation per ELF.
+   // Keep this choice across main/sub-program stream generation.
+   bit                                 hypertest_page_table_kind_set;
+   bit                                 hypertest_dynamic_page_tables;
 
   `uvm_object_utils(riscv_asm_program_gen)
 
@@ -62,6 +66,9 @@ class riscv_asm_program_gen extends uvm_object;
 
   // This is the main function to generate all sections of the program.
   virtual function void gen_program();
+    hypertest_page_table_kind_set = 0;
+    hypertest_dynamic_page_tables = 0;
+    check_hypertest_config();
     if (cfg.pmp_cfg.enable_random_pmp_exception) begin
       // Parse command-line PMP/ePMP overrides before validating the injection
       // mode.  The injected handler is deliberately an M-mode routine and
@@ -312,6 +319,7 @@ class riscv_asm_program_gen extends uvm_object;
                                        .label(sub_program[i].get_name()),
                                        .original_instr_cnt(sub_program[i].instr_cnt),
                                        .min_insert_cnt(0),
+                                       .is_debug_program(is_debug),
                                        .instr_stream(sub_program[i].directed_instr));
         sub_program[i].label_name = sub_program[i].get_name();
         sub_program[i].cfg = cfg;
@@ -398,6 +406,13 @@ class riscv_asm_program_gen extends uvm_object;
 
   virtual function void gen_data_page_begin(int hart);
     instr_stream.push_back(".section .data");
+    if (cfg.restrict_dv_stores_to_data()) begin
+      // The legacy ECALL dump overwrites _start. Keep terminal bookkeeping
+      // out of executable memory too, even when random data pages are off.
+      instr_stream.push_back($sformatf(".balign %0d", XLEN / 8));
+      instr_stream.push_back($sformatf("%0sregister_dump:", hart_prefix(hart)));
+      instr_stream.push_back($sformatf(".zero %0d", 32 * XLEN / 8));
+    end
     if (hart == 0) begin
       instr_stream.push_back(".align 6; .global tohost; tohost: .dword 0;");
       instr_stream.push_back(".align 6; .global fromhost; fromhost: .dword 0;");
@@ -801,10 +816,14 @@ class riscv_asm_program_gen extends uvm_object;
   // TB can check the GPR value for this memory location to compare with expected value generated
   // by the ISA simulator. If the processor doesn't have a good tracer unit, it might not be
   // possible to compare the GPR value after each instruction execution.
-  virtual function void gen_register_dump(ref string instr[$]);
+  virtual function void gen_register_dump(ref string instr[$], input int hart = 0);
     string str;
     // Load base address
-    str = $sformatf("la x%0d, _start", cfg.gpr[0]);
+    if (cfg.restrict_dv_stores_to_data()) begin
+      str = $sformatf("la x%0d, %0sregister_dump", cfg.gpr[0], hart_prefix(hart));
+    end else begin
+      str = $sformatf("la x%0d, _start", cfg.gpr[0]);
+    end
     instr.push_back(str);
     // Generate sw/sd instructions
     for(int i = 0; i < 32; i++) begin
@@ -1308,7 +1327,7 @@ class riscv_asm_program_gen extends uvm_object;
   virtual function void gen_ecall_handler(int hart);
     string instr[$];
     dump_perf_stats(instr);
-    gen_register_dump(instr);
+    gen_register_dump(instr, hart);
     instr.push_back($sformatf("la x%0d, write_tohost", cfg.scratch_reg));
     instr.push_back($sformatf("jalr x0, x%0d, 0", cfg.scratch_reg));
     gen_section(get_label("ecall_handler", hart), instr);
@@ -1797,6 +1816,157 @@ class riscv_asm_program_gen extends uvm_object;
     end
   endfunction
 
+  // The ported Sv48 cases install a private M-mode trap vector, briefly enter
+  // S-mode, and return to the interrupted M-mode sequence. Reject unsupported
+  // contexts before producing an ELF that would only fault or skip the check.
+  virtual function void check_hypertest_config();
+    if (!cfg.enable_random_hypertest) return;
+    if ((XLEN != 64) || (SATP_MODE != SV48) ||
+        !(SUPERVISOR_MODE inside {supported_privileged_mode})) begin
+      `uvm_fatal(`gfn,
+                "+enable_random_hypertest requires an RV64 Sv48 target with S-mode support")
+    end
+    if (cfg.init_privileged_mode != MACHINE_MODE) begin
+      `uvm_fatal(`gfn,
+                "+enable_random_hypertest requires +boot_mode=m; random S/U boot is unsupported")
+    end
+    if (cfg.num_of_harts != 1) begin
+      `uvm_fatal(`gfn, "+enable_random_hypertest requires exactly one hart")
+    end
+    if (cfg.bare_program_mode) begin
+      `uvm_fatal(`gfn, "+enable_random_hypertest is unsupported in bare program mode")
+    end
+    if (cfg.no_directed_instr) begin
+      `uvm_fatal(`gfn, "+enable_random_hypertest conflicts with +no_directed_instr=1")
+    end
+    if (cfg.set_mstatus_mprv || cfg.mstatus_mprv) begin
+      `uvm_fatal(`gfn, "+enable_random_hypertest requires MSTATUS.MPRV=0")
+    end
+    if (cfg.pmp_cfg.enable_random_pmp_exception) begin
+      `uvm_fatal(`gfn,
+                "+enable_random_hypertest conflicts with +enable_random_pmp_exception=1")
+    end
+  endfunction
+
+  // The only source including dynamic_page_tables.h is the vendored
+  // manual_test_cases/special/dynamic_page_table_test.c. Keep this list in
+  // sync with its bool test functions; the adapter independently verifies
+  // source dependencies and rejects mixed static/dynamic links.
+  virtual function bit is_dynamic_page_table_hypertest_case(string case_name);
+    case (case_name)
+      "test_sv39_mode", "test_sv48_mode",
+      "test_sv39_to_sv48_switch", "test_sv48_to_sv39_switch",
+      "test_multiple_switches_s_mode", "test_multiple_switches_u_mode",
+      "satp_mode_test", "satp_ppn_test", "satp_ppn_asid_limit_test":
+        return 1;
+      default: return 0;
+    endcase
+  endfunction
+
+  virtual function bit is_native_hypertest_case(string case_name);
+    return (case_name == "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner" ||
+            case_name == "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner");
+  endfunction
+
+  // Maintain a separate pool and density so callers can enable these cases
+  // without editing ordinary directed candidates or enabling their random pool.
+  virtual function void generate_random_hypertest_streams(
+      input int hart,
+      input string label,
+      input int unsigned original_instr_cnt,
+      input int unsigned min_insert_cnt,
+      input bit kernel_mode,
+      input bit is_debug_program,
+      ref riscv_instr_stream streams[]);
+    string candidates[$];
+    string static_candidates[$];
+    string dynamic_candidates[$];
+    string eligible_candidates[$];
+    int catalog_fd;
+    string case_entry;
+    int unsigned insert_cnt;
+    uvm_object object_h;
+    riscv_rand_instr_stream stream;
+    uvm_coreservice_t coreservice = uvm_coreservice_t::get();
+    uvm_factory factory = coreservice.get_factory();
+    if (!cfg.enable_random_hypertest || (cfg.random_hypertest_ratio == 0) ||
+        kernel_mode || is_debug_program) return;
+    if (cfg.hypertest_case_names != "") begin
+      uvm_split_string(cfg.hypertest_case_names, ",", candidates);
+    end else if ((cfg.hypertest_case_file == "") && cfg.restrict_store_to_data) begin
+      // Only these native ports have a proof that stores never target text.
+      candidates = '{"ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner",
+                     "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner"};
+    end else begin
+      if (cfg.hypertest_case_file == "") begin
+        `uvm_fatal(`gfn, "Hypertest candidate file is unset; use run.py or +hypertest_case_names=<exact names>")
+      end
+      catalog_fd = $fopen(cfg.hypertest_case_file, "r");
+      if (!catalog_fd) begin
+        `uvm_fatal(`gfn, "Cannot open hypertest catalog; use run.py or +hypertest_case_names=<exact names>")
+      end
+      while ($fscanf(catalog_fd, "%s", case_entry) == 1) candidates.push_back(case_entry);
+      $fclose(catalog_fd);
+    end
+    if (candidates.size() == 0) `uvm_fatal(`gfn, "Hypertest candidate list is empty")
+    foreach (candidates[i]) begin
+      if (!is_dynamic_page_table_hypertest_case(candidates[i]))
+        static_candidates.push_back(candidates[i]);
+      if (is_dynamic_page_table_hypertest_case(candidates[i]) ||
+          is_native_hypertest_case(candidates[i]))
+        dynamic_candidates.push_back(candidates[i]);
+    end
+    if (hypertest_page_table_kind_set) begin
+      if (hypertest_dynamic_page_tables) eligible_candidates = dynamic_candidates;
+      else eligible_candidates = static_candidates;
+    end else eligible_candidates = candidates;
+    if (eligible_candidates.size() == 0) begin
+      `uvm_fatal(`gfn, "Hypertest candidate list cannot satisfy the ELF page-table implementation already selected")
+    end
+    insert_cnt = original_instr_cnt * cfg.random_hypertest_ratio / 1000;
+    if (insert_cnt < min_insert_cnt) insert_cnt = min_insert_cnt;
+    `uvm_info(`gfn, $sformatf(
+              "Randomly insert %0d hypertest streams into %0s at ratio %0d/1000",
+              insert_cnt, label, cfg.random_hypertest_ratio), UVM_LOW)
+    for (int i = 0; i < insert_cnt; i++) begin
+      string selected_case = eligible_candidates[$urandom_range(eligible_candidates.size() - 1, 0)];
+      string stream_name = "riscv_hypertest_case_stream";
+      string name = $sformatf("%0s_hypertest_%0d", label, i);
+      riscv_hypertest_case_stream case_stream;
+      if ((selected_case == "ai_arch_vector_zvbb_full_opcode_sew_reference_matrix_corner") &&
+          (!(RVV inside {supported_isa}) || !(ZVBB inside {supported_isa}))) begin
+        `uvm_fatal(`gfn, "The selected hypertest Zvbb case requires target RVV and ZVBB support")
+      end
+      if (!hypertest_page_table_kind_set &&
+          !is_native_hypertest_case(selected_case)) begin
+        hypertest_dynamic_page_tables = is_dynamic_page_table_hypertest_case(selected_case);
+        hypertest_page_table_kind_set = 1;
+        if (hypertest_dynamic_page_tables) eligible_candidates = dynamic_candidates;
+        else eligible_candidates = static_candidates;
+      end
+      if (selected_case == "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner")
+        stream_name = "riscv_hypertest_sv48_canonical_stream";
+      else if (selected_case == "ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner")
+        stream_name = "riscv_hypertest_sv48_canonical_x_deny_stream";
+      object_h = factory.create_object_by_name(stream_name, get_full_name(), name);
+      if ((object_h == null) || !$cast(stream, object_h)) begin
+        `uvm_fatal(`gfn, $sformatf("Cannot create hypertest stream %0s", stream_name))
+      end
+      stream.cfg = cfg;
+      stream.hart = hart;
+      stream.label = name;
+      stream.kernel_mode = 0;
+      stream.preserve_runtime_regs = 1;
+      if ($cast(case_stream, stream)) case_stream.case_name = selected_case;
+      check_restricted_directed_stream(stream);
+      `DV_CHECK_RANDOMIZE_FATAL(stream)
+      streams = {streams, stream};
+      `uvm_info(`gfn, $sformatf(
+                "Selected random hypertest case: %0s via %0s (%0s)",
+                selected_case, stream_name, name), UVM_LOW)
+    end
+  endfunction
+
   virtual function void add_random_directed_instr_candidate(
       input string name,
       ref string names[$],
@@ -1883,12 +2053,45 @@ class riscv_asm_program_gen extends uvm_object;
     end
   endfunction
 
+  // A user-supplied/factory-overridden stream must not silently bypass the
+  // address proof of the built-in bounded streams. Validate the actual type,
+  // both for explicit directed entries and automatic random injection.
+  virtual function void check_restricted_directed_stream(riscv_rand_instr_stream stream);
+    string stream_type;
+    if (!cfg.restrict_dv_stores_to_data()) return;
+    stream_type = stream.get_type_name();
+    // The scoped option guards DV-generated writes only. Imported Hypertest
+    // source has its own intentional memory effects; the strict option must
+    // continue rejecting it, even if both options were supplied.
+    if (cfg.restrict_generated_store_to_data && !cfg.restrict_store_to_data &&
+        (stream_type == "riscv_hypertest_case_stream")) begin
+      stream.preserve_runtime_regs = 1'b1;
+      return;
+    end
+    if (!(stream_type inside {
+        "riscv_loop_instr", "riscv_jal_instr", "riscv_int_numeric_corner_stream",
+        "riscv_single_load_store_instr_stream", "riscv_load_store_stress_instr_stream",
+        "riscv_load_store_rand_instr_stream", "riscv_hazard_instr_stream",
+        "riscv_load_store_hazard_instr_stream", "riscv_multi_page_load_store_instr_stream",
+        "riscv_mem_region_stress_test", "riscv_load_store_shared_mem_stream",
+        "riscv_lr_sc_instr_stream", "riscv_amo_instr_stream", "riscv_cbo_instr_stream",
+        "riscv_vector_load_store_instr_stream",
+        "riscv_hypertest_sv48_canonical_stream",
+        "riscv_hypertest_sv48_canonical_x_deny_stream"})) begin
+      `uvm_fatal(`gfn, $sformatf(
+        "+restrict_store_to_data: directed stream %0s has no verified bounded write addresses",
+        stream_type))
+    end
+    stream.preserve_runtime_regs = 1'b1;
+  endfunction
+
   // Generate directed instruction stream based on the ratio setting
   virtual function void generate_directed_instr_stream(input int hart,
                                                        input string label,
                                                        input int unsigned original_instr_cnt,
                                                        input int unsigned min_insert_cnt = 0,
                                                        input bit kernel_mode = 0,
+                                                       input bit is_debug_program = 0,
                                                        output riscv_instr_stream instr_stream[]);
     uvm_object object_h;
     riscv_rand_instr_stream new_instr_stream;
@@ -1901,6 +2104,8 @@ class riscv_asm_program_gen extends uvm_object;
     uvm_coreservice_t coreservice = uvm_coreservice_t::get();
     uvm_factory factory = coreservice.get_factory();
     if(cfg.no_directed_instr) return;
+    generate_random_hypertest_streams(hart, label, original_instr_cnt, min_insert_cnt,
+                                     kernel_mode, is_debug_program, instr_stream);
     if (cfg.enable_random_directed_instr) begin
       // In random mode, the configured ratios are weights used to select the
       // next stream. The total insertion density comes from the dedicated
@@ -1970,6 +2175,7 @@ class riscv_asm_program_gen extends uvm_object;
           new_instr_stream.label = $sformatf("%0s_%0d", label, idx);
           new_instr_stream.kernel_mode = kernel_mode;
           new_instr_stream.preserve_runtime_regs = 1'b1;
+          check_restricted_directed_stream(new_instr_stream);
           `DV_CHECK_RANDOMIZE_FATAL(new_instr_stream)
           instr_stream = {instr_stream, new_instr_stream};
         end else begin
@@ -2006,6 +2212,7 @@ class riscv_asm_program_gen extends uvm_object;
           new_instr_stream.hart = hart;
           new_instr_stream.label = $sformatf("%0s_%0d", label, idx);
           new_instr_stream.kernel_mode = kernel_mode;
+          check_restricted_directed_stream(new_instr_stream);
           `DV_CHECK_RANDOMIZE_FATAL(new_instr_stream)
           instr_stream = {instr_stream, new_instr_stream};
         end else begin

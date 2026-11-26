@@ -1,0 +1,102 @@
+# Ported hypertest Sv48 fetch cases. Run with the SystemVerilog backend and
+# --cmp_opts='+define+NANHU_V5_1_SV48' on target nanhu_v5_1.
+# Every entry requires gen,gcc_compile,iss_sim with --iss spike.
+
+- test: hypertest_sv48_random_smoke
+  description: >
+    Randomly inject the two ported Sv48 canonical-boundary hypertest streams
+    without enabling the ordinary random directed-stream pool.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +enable_random_directed_instr=0
+    +enable_random_hypertest=1
+    +hypertest_case_names=ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_corner,ai_micro_hs_sv48_upper_canonical_jump_to_non_cfi_block_x_deny_corner
+    +random_hypertest_ratio=4
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+
+- test: hypertest_sv48_mixed_restricted_smoke
+  description: >
+    Combine ported Sv48 hypertest streams with ordinary random directed
+    streams while confining generated stores to data and stack regions.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +restrict_store_to_data=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=4
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+
+- test: hypertest_sv48_canonical_explicit
+  description: >
+    Force one executable-boundary hypertest stream in main, including cold
+    and warm canonical-boundary faults and the executable canonical-alias control.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +enable_random_directed_instr=0
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=0
+    +no_branch_jump=1
+    +directed_instr_0=riscv_hypertest_sv48_canonical_stream,1
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+
+- test: hypertest_sv48_canonical_x_deny_explicit
+  description: >
+    Force one non-executable-boundary hypertest stream in main, preserving
+    the existing hypertest cold and warm X-permission comparison scenario.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +enable_random_directed_instr=0
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=0
+    +no_branch_jump=1
+    +directed_instr_0=riscv_hypertest_sv48_canonical_x_deny_stream,1
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d

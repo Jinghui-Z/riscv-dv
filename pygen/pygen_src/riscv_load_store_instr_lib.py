@@ -32,6 +32,18 @@ class locality_e(IntEnum):
     SPARSE = auto()
 
 
+# Full memory footprint, including compressed and floating-point forms.
+_ACCESS_BYTES = {
+    name: width
+    for width, names in (
+        (1, 'LB LBU SB'),
+        (2, 'LH LHU SH'),
+        (4, 'LW LWU SW FLW FSW C_LW C_SW C_LWSP C_SWSP C_FLW C_FSW'),
+        (8, 'LD SD FLD FSD C_LD C_SD C_LDSP C_SDSP C_FLD C_FSD'),
+    ) for name in names.split()
+}
+
+
 # Base class for all load/store instruction stream
 @vsc.randobj
 class riscv_load_store_base_instr_stream(riscv_mem_access_stream):
@@ -77,6 +89,9 @@ class riscv_load_store_base_instr_stream(riscv_mem_access_stream):
         self.base in vsc.rangelist(vsc.rng(0, self.max_load_store_offset - 1))
 
     def randomize_offset(self):
+        if cfg.restrict_dv_store_to_data:
+            self._randomize_bounded_offset()
+            return
         addr_ = vsc.rand_int32_t()
         offset_ = vsc.rand_int32_t()
         self.offset = [0] * self.num_load_store
@@ -100,6 +115,24 @@ class riscv_load_store_base_instr_stream(riscv_mem_access_stream):
             self.offset[i] = offset_
             self.addr[i] = addr_
 
+    def _randomize_bounded_offset(self, hazard_ratio=0):
+        """Choose encoded offsets whose effective address is inside the page."""
+        span = {locality_e.NARROW: 16, locality_e.HIGH: 64,
+                locality_e.MEDIUM: 256, locality_e.SPARSE: 2048}[self.locality]
+        base, size = int(self.base), int(self.max_load_store_offset)
+        low = max(-span, -base)
+        high = min(span - 1, size - base - 1, 2047)
+        if low > high:
+            raise ValueError('restrict_store_to_data: empty data address range')
+        self.offset, self.addr = [], []
+        for i in range(self.num_load_store):
+            if i and random.randrange(100) < hazard_ratio:
+                offset = self.offset[-1]
+            else:
+                offset = random.randint(low, high)
+            self.offset.append(offset)
+            self.addr.append(base + offset)
+
     def pre_randomize(self):
         super().pre_randomize()
         if(riscv_reg_t.SP in [cfg.reserved_regs, self.reserved_rd]):
@@ -109,6 +142,18 @@ class riscv_load_store_base_instr_stream(riscv_mem_access_stream):
             self.sp_rnd_order_c.constraint_mode(False)
 
     def post_randomize(self):
+        if cfg.restrict_dv_store_to_data:
+            # The legacy rs1 constraint is disabled for PyVSC compatibility.
+            # Select explicitly after solving; in particular, x0 cannot hold
+            # a data base and runtime SP must never be replaced by one.
+            reserved = {int(reg) for reg in cfg.reserved_regs}
+            reserved.update(int(reg) for reg in self.reserved_rd)
+            reserved.update((int(riscv_reg_t.ZERO), int(riscv_reg_t.SP),
+                             int(riscv_reg_t.TP), int(riscv_reg_t.GP)))
+            candidates = [reg for reg in riscv_reg_t if int(reg) not in reserved]
+            if not candidates:
+                raise ValueError('restrict_store_to_data: no safe base register')
+            self.rs1_reg = random.choice(candidates)
         self.randomize_offset()
         # rs1 cannot be modified by other instructions
         if not(self.rs1_reg in self.reserved_rd):
@@ -205,6 +250,15 @@ class riscv_load_store_base_instr_stream(riscv_mem_access_stream):
                         else:
                             allowed_instr.extend(
                                 [riscv_instr_name_t.C_LD, riscv_instr_name_t.C_SD])
+            if cfg.restrict_dv_store_to_data:
+                # Bound the entire access, not just its first byte. Narrow
+                # stores remain legal at the final bytes of a data region.
+                allowed_instr = [name for name in allowed_instr
+                                 if 0 <= self.addr[i] and
+                                 self.addr[i] + _ACCESS_BYTES[name.name] <=
+                                 int(self.max_load_store_offset)]
+                if not allowed_instr:
+                    raise ValueError('restrict_store_to_data: no bounded access')
             instr = riscv_instr.get_load_store_instr(allowed_instr)
             instr.has_rs1 = 0
             instr.has_imm = 0
@@ -283,6 +337,9 @@ class riscv_load_store_hazard_instr_stream(riscv_load_store_base_instr_stream):
         self.num_mixed_instr.inside(vsc.rangelist(vsc.rng(1, 7)))
 
     def randomize_offset(self):
+        if cfg.restrict_dv_store_to_data:
+            self._randomize_bounded_offset(int(self.hazard_ratio))
+            return
         addr_ = vsc.rand_int32_t()
         offset_ = vsc.rand_int32_t()
         self.offset = [0] * self.num_load_store

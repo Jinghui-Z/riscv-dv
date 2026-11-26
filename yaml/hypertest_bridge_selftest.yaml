@@ -1,0 +1,13 @@
+# Synthetic adapter validation; this is not an imported upstream case.
+# The full validation flow must include gen,gcc_compile,iss_sim and --iss spike.
+- test: hypertest_bridge_selftest
+  description: >
+    Call a synthetic state-clobbering case twice through the hypertest bridge
+    and check M/S CSRs plus all floating-point and vector registers, including
+    restoration of Initial and Clean FS/VS states. This adapter validation does
+    not count as an imported hypertest case.
+  iterations: 1
+  asm_test: <riscv_dv_root>/src/hypertest/bridge_selftest_main.S
+  gcc_opts: >
+    -march=rv64imafdcv_zicsr_zifencei
+    -mabi=lp64d

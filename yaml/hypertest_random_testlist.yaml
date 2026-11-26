@@ -1,0 +1,50 @@
+# Reviewed hypertest cases mixed with the ordinary random directed-stream pool.
+# Full imported inventory: hypertest_catalog_testlist.yaml (4636 entries).
+- test: hypertest_random_pool_smoke
+  description: >
+    Mix the reviewed native and source-adapter hypertest pool with ordinary
+    random directed streams. Per-injection Spike markers record actual hits.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=1
+    +random_hypertest_ratio=8
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d
+
+- test: hypertest_random_pool_disabled
+  description: >
+    Keep ordinary random directed streams enabled while disabling hypertest.
+    No hypertest code, source objects, or case execution markers are required.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +instr_cnt=1000
+    +num_of_sub_program=0
+    +boot_mode=m
+    +enable_floating_point=1
+    +no_csr_instr=1
+    +no_ebreak=1
+    +no_ecall=1
+    +no_dret=1
+    +no_wfi=1
+    +no_branch_jump=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=4
+    +enable_random_hypertest=0
+  gcc_opts: >
+    -march=rv64imafdcv_zba_zbb_zbc_zbs_zbkb_zbkc_zbkx_zcb_zicond_zimop_zcmop_zicbom_zicbop_zicboz_zknd_zkne_zknh_zksed_zksh_zvbb_zicsr_zifencei
+    -mabi=lp64d

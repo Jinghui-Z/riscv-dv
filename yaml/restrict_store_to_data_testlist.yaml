@@ -1,0 +1,187 @@
+# Positive tests run through gen,gcc_compile,iss_sim with --iss spike.
+# Expected-failure entries must be selected individually as generator diagnostics.
+
+- test: restrict_store_to_data_scalar
+  description: >
+    Check scalar and AMO/LR-SC full-width bounds against tiny odd-sized data
+    regions, then run an ELF with explicit load/store, loop, jump and atomic streams.
+  iterations: 1
+  gen_test: riscv_restrict_store_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=300
+    +num_of_sub_program=1
+    +boot_mode=m
+    +enable_floating_point=1
+    +enable_unaligned_load_store=1
+    +directed_instr_0=riscv_load_store_rand_instr_stream,8
+    +directed_instr_1=riscv_load_store_hazard_instr_stream,4
+    +directed_instr_2=riscv_amo_instr_stream,4
+    +directed_instr_3=riscv_lr_sc_instr_stream,4
+    +directed_instr_4=riscv_loop_instr,4
+    +directed_instr_5=riscv_jal_instr,4
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+- test: restrict_store_to_data_auto
+  description: >
+    Exercise automatic directed-stream selection with store confinement enabled.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=30
+    +instr_cnt=500
+    +num_of_sub_program=1
+    +boot_mode=m
+    +enable_unaligned_load_store=1
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+- test: restrict_store_to_data_reject_arbitrary
+  description: >
+    Expected generator failure: explicitly selected arbitrary-address stream
+    cannot establish that its stores remain in allocated data regions.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=100
+    +num_of_sub_program=0
+    +boot_mode=m
+    +directed_instr_0=riscv_load_store_rand_addr_instr_stream,10
+
+- test: restrict_store_to_data_vector
+  description: >
+    NanHu Vector 1.0 bounded memory streams with the normal legal vector state.
+    Each memory operation re-establishes the state used by its address allocator.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=300
+    +num_of_sub_program=1
+    +boot_mode=m
+    +enable_floating_point=1
+    +enable_vector_extension=1
+    +use_vector_1_0=1
+    +vec_fp=1
+    +enable_vec_fp64=1
+    +vec_narrowing_widening=1
+    +use_vsetivli=1
+    +enable_random_vset_instr=0
+    +enable_zvbb_extension=1
+    +enable_zvlsseg=0
+    +enable_fault_only_first_load=1
+    +vector_instr_only=1
+    +directed_instr_0=riscv_vector_load_store_instr_stream,60
+  gcc_opts: >
+    -march=rv64imafdcv_zvbb_zicsr_zifencei
+    -mabi=lp64d
+
+- test: restrict_store_to_data_cbo
+  description: >
+    NanHu cache-block operations including CBO.ZERO. The generator and Spike
+    explicitly agree on a 64-byte zeroing granule; RTL must use that same granule.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +cbo_zero_block_size=64
+    +instr_cnt=300
+    +num_of_sub_program=1
+    +boot_mode=m
+    +enable_zicbom_extension=1
+    +enable_zicboz_extension=1
+    +directed_instr_0=riscv_cbo_instr_stream,10
+  gcc_opts: >
+    -march=rv64imafdc_zicbom_zicboz_zicsr_zifencei
+    -mabi=lp64d
+  iss_opts: --blocksz=64
+
+- test: restrict_store_to_data_smode
+  description: >
+    Supervisor-mode scalar and atomic stores using the generated Sv39 mapping
+    and separate kernel/user data regions.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=300
+    +num_of_sub_program=1
+    +boot_mode=s
+    +enable_unaligned_load_store=1
+    +directed_instr_0=riscv_load_store_rand_instr_stream,10
+    +directed_instr_1=riscv_amo_instr_stream,4
+    +directed_instr_2=riscv_lr_sc_instr_stream,4
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+- test: restrict_store_to_data_off
+  description: >
+    Legacy switch-off compatibility test, also runnable with the neighboring
+    rv64gc target to check that unrestricted generation remains available.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=0
+    +instr_cnt=300
+    +num_of_sub_program=1
+    +boot_mode=m
+    +enable_unaligned_load_store=1
+    +directed_instr_0=riscv_load_store_rand_instr_stream,10
+    +directed_instr_1=riscv_amo_instr_stream,4
+    +directed_instr_2=riscv_lr_sc_instr_stream,4
+  gcc_opts: >
+    -march=rv64imafdc_zicsr_zifencei
+    -mabi=lp64d
+    -mno-strict-align
+
+- test: restrict_store_to_data_reject_unknown
+  description: >
+    Expected generator failure: registered custom stream has no validated
+    store-address policy and must be rejected before instruction generation.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=100
+    +num_of_sub_program=0
+    +boot_mode=m
+    +directed_instr_0=riscv_unproven_store_test_stream,10
+
+- test: restrict_store_to_data_reject_random_explicit
+  description: >
+    Expected generator failure: random selection from an explicit candidate
+    pool must still reject the arbitrary-address stream.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +enable_random_directed_instr=1
+    +random_directed_instr_ratio=10
+    +instr_cnt=100
+    +num_of_sub_program=0
+    +boot_mode=m
+    +directed_instr_0=riscv_load_store_rand_addr_instr_stream,10
+
+- test: restrict_store_to_data_reject_factory_override
+  description: >
+    Expected generator failure: a factory override replacing an approved stream
+    with an unvalidated actual type must not bypass the stream policy.
+  iterations: 1
+  gen_test: riscv_instr_base_test
+  gen_opts: >
+    +restrict_store_to_data=1
+    +instr_cnt=100
+    +num_of_sub_program=0
+    +boot_mode=m
+    +directed_instr_0=riscv_load_store_rand_instr_stream,10
+    +uvm_set_type_override=riscv_load_store_rand_instr_stream,riscv_unproven_store_test_stream

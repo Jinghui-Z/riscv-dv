@@ -45,6 +45,11 @@ class riscv_amo_base_instr_stream extends riscv_mem_access_stream;
   constraint addr_range_c {
     foreach (offset[i]) {
       offset[i] inside {[0 : max_offset - 1]};
+      if (cfg.restrict_store_to_data || cfg.restrict_generated_store_to_data) {
+        // The generated AMO/LR/SC may use any supported width up to XLEN.
+        // Bound the final byte as well as the first one.
+        offset[i] <= max_offset - XLEN / 8;
+      }
     }
   }
 
@@ -64,6 +69,22 @@ class riscv_amo_base_instr_stream extends riscv_mem_access_stream;
   function void pre_randomize();
     data_page = cfg.amo_region;
     max_data_page_id = data_page.size();
+    if (cfg.restrict_dv_stores_to_data()) begin
+      // This override does not call riscv_mem_access_stream::pre_randomize;
+      // repeat its allocation checks for the AMO-only shared region pool.
+      if (cfg.no_data_page || (max_data_page_id == 0) ||
+          !(RV32A inside {supported_isa})) begin
+        `uvm_fatal(`gfn, {"restrict_store_to_data: AMO stream requires generated shared data ",
+          "(no_data_page=0 and target RV32A support)"})
+      end
+      foreach (data_page[i]) begin
+        if ((data_page[i].size_in_bytes < XLEN / 8) || !data_page[i].xwr[1]) begin
+          `uvm_fatal(`gfn, $sformatf(
+            "restrict_store_to_data: AMO region %0s must be writable and hold an XLEN access",
+            data_page[i].name))
+        end
+      end
+    end
     data_page_id = $urandom_range(0, max_data_page_id - 1);
     max_offset = data_page[data_page_id].size_in_bytes;
   endfunction
@@ -193,7 +214,14 @@ class riscv_amo_instr_stream extends riscv_amo_base_instr_stream;
   virtual function void gen_amo_instr();
     amo_instr = new[num_amo];
     foreach (amo_instr[i]) begin
-      amo_instr[i] = riscv_instr::get_rand_instr(.include_category({AMO}));
+      if (cfg.restrict_dv_stores_to_data()) begin
+        // Legacy vector AMOs share category AMO but have an indexed vector
+        // footprint, not the scalar XLEN footprint proven by this stream.
+        amo_instr[i] = riscv_instr::get_rand_instr(.include_category({AMO}),
+                                                   .exclude_group({RVV}));
+      end else begin
+        amo_instr[i] = riscv_instr::get_rand_instr(.include_category({AMO}));
+      end
       `DV_CHECK_RANDOMIZE_WITH_FATAL(amo_instr[i],
         if (reserved_rd.size() > 0) {
           !(rd inside {reserved_rd});
@@ -220,6 +248,14 @@ class riscv_vector_amo_instr_stream extends riscv_vector_load_store_instr_stream
 
   `uvm_object_utils(riscv_vector_amo_instr_stream)
   `uvm_object_new
+
+  function void pre_randomize();
+    if (cfg.restrict_dv_stores_to_data()) begin
+      `uvm_fatal(`gfn, {"restrict_store_to_data does not support the legacy ",
+        "riscv_vector_amo_instr_stream; its draft-ISA address footprint is not validated"})
+    end
+    super.pre_randomize();
+  endfunction
 
   virtual function void add_element_vec_load_stores();
     allowed_instr = {VAMOSWAPE_V, VAMOADDE_V, VAMOXORE_V,

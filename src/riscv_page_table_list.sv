@@ -285,6 +285,9 @@ class riscv_page_table_list#(satp_mode_t MODE = SV39) extends uvm_object;
        (level > 0) && (pte.xwr != NEXT_LEVEL_PAGE)) begin
       bit [riscv_page_table_entry#(MODE)::VPN_WIDTH-1:0] fault_ppn;
       `DV_CHECK_STD_RANDOMIZE_FATAL(fault_ppn)
+      // A zero low PPN would accidentally produce a valid superpage rather
+      // than the intended fault. Restricted stores must never use that alias.
+      if (cfg.restrict_dv_stores_to_data() && (fault_ppn == '0)) fault_ppn = 1;
       if(level == 3) begin
         pte.ppn2 = fault_ppn;
       end else if (level == 2) begin

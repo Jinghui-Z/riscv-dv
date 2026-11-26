@@ -159,6 +159,13 @@ class riscv_instr_gen_config extends uvm_object;
   // Options to turn off some specific types of instructions
   bit                    no_branch_jump;     // No branch/jump instruction
   bit                    no_load_store;      // No load/store instruction
+  // Keep generated memory streams inside dedicated, non-code data regions.
+  bit                    restrict_store_to_data;
+  // Apply the same generator-owned store bounds while leaving imported
+  // Hypertest C/ASM writes under the source case's own semantics.
+  bit                    restrict_generated_store_to_data;
+  // Platform CBO.ZERO granule; zero means unspecified (never guess a DUT value).
+  int                    cbo_zero_block_size = 0;
   bit                    no_csr_instr;       // No csr instruction
   bit                    no_ebreak = 1;      // No ebreak instruction
   // Only enable ecall if you have overriden the test_done mechanism.
@@ -195,6 +202,12 @@ class riscv_instr_gen_config extends uvm_object;
   // candidate list; when no list is supplied, riscv_loop_instr is used.
   bit                    enable_random_directed_instr = 1'b0;
   int                    random_directed_instr_ratio = 4;
+  // Independently inject the ported hypertest architectural corner streams.
+  bit                    enable_random_hypertest = 1'b0;
+  int                    random_hypertest_ratio = 4;
+  // Comma-separated exact source case names, or a newline-separated catalog.
+  string                 hypertest_case_names;
+  string                 hypertest_case_file;
   // A name suffix for the generated assembly program
   string                 asm_test_suffix;
   // Enable interrupt bit in MSTATUS (MIE, SIE, UIE)
@@ -567,6 +580,17 @@ class riscv_instr_gen_config extends uvm_object;
     }
   }
 
+  // A restored vector state must be supported, not merely fit VLEN bits.
+  // For fractional LMUL, SEW <= LMUL * ELEN (e.g. e32,mf4 is reserved
+  // with ELEN=64 even though a 128-bit vector register can hold one element).
+  constraint restricted_vector_state_c {
+    if ((restrict_store_to_data || restrict_generated_store_to_data) &&
+        enable_vector_extension &&
+        vector_cfg.vtype.fractional_lmul) {
+      vector_cfg.vtype.vsew * vector_cfg.vtype.vlmul <= ELEN;
+    }
+  }
+
   `uvm_object_utils_begin(riscv_instr_gen_config)
     `uvm_field_int(main_program_instr_cnt, UVM_DEFAULT)
     `uvm_field_sarray_int(sub_program_instr_cnt, UVM_DEFAULT)
@@ -581,6 +605,9 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_int(no_data_page, UVM_DEFAULT)
     `uvm_field_int(no_branch_jump, UVM_DEFAULT)
     `uvm_field_int(no_load_store, UVM_DEFAULT)
+    `uvm_field_int(restrict_store_to_data, UVM_DEFAULT)
+    `uvm_field_int(restrict_generated_store_to_data, UVM_DEFAULT)
+    `uvm_field_int(cbo_zero_block_size, UVM_DEFAULT)
     `uvm_field_int(no_csr_instr, UVM_DEFAULT)
     `uvm_field_int(no_ebreak, UVM_DEFAULT)
     `uvm_field_int(no_ecall, UVM_DEFAULT)
@@ -603,6 +630,10 @@ class riscv_instr_gen_config extends uvm_object;
     `uvm_field_int(no_directed_instr, UVM_DEFAULT)
     `uvm_field_int(enable_random_directed_instr, UVM_DEFAULT)
     `uvm_field_int(random_directed_instr_ratio, UVM_DEFAULT)
+    `uvm_field_int(enable_random_hypertest, UVM_DEFAULT)
+    `uvm_field_int(random_hypertest_ratio, UVM_DEFAULT)
+    `uvm_field_string(hypertest_case_names, UVM_DEFAULT)
+    `uvm_field_string(hypertest_case_file, UVM_DEFAULT)
     `uvm_field_int(enable_interrupt, UVM_DEFAULT)
     `uvm_field_int(enable_timer_irq, UVM_DEFAULT)
     `uvm_field_int(bare_program_mode, UVM_DEFAULT)
@@ -706,6 +737,10 @@ class riscv_instr_gen_config extends uvm_object;
     get_bool_arg_value("+no_wfi=", no_wfi);
     get_bool_arg_value("+no_branch_jump=", no_branch_jump);
     get_bool_arg_value("+no_load_store=", no_load_store);
+    get_bool_arg_value("+restrict_store_to_data=", restrict_store_to_data);
+    get_bool_arg_value("+restrict_generated_store_to_data=",
+                       restrict_generated_store_to_data);
+    get_int_arg_value("+cbo_zero_block_size=", cbo_zero_block_size);
     get_bool_arg_value("+no_csr_instr=", no_csr_instr);
     get_bool_arg_value("+fix_sp=", fix_sp);
     get_bool_arg_value("+use_push_data_section=", use_push_data_section);
@@ -728,6 +763,15 @@ class riscv_instr_gen_config extends uvm_object;
       `uvm_fatal(get_full_name(), $sformatf(
                 "random_directed_instr_ratio must be in [0:1000], got %0d",
                 random_directed_instr_ratio))
+    end
+    get_bool_arg_value("+enable_random_hypertest=", enable_random_hypertest);
+    get_int_arg_value("+random_hypertest_ratio=", random_hypertest_ratio);
+    void'(inst.get_arg_value("+hypertest_case_names=", hypertest_case_names));
+    void'(inst.get_arg_value("+hypertest_case_file=", hypertest_case_file));
+    if ((random_hypertest_ratio < 0) || (random_hypertest_ratio > 1000)) begin
+      `uvm_fatal(get_full_name(), $sformatf(
+                "random_hypertest_ratio must be in [0:1000], got %0d",
+                random_hypertest_ratio))
     end
     get_bool_arg_value("+enable_random_boot_mode=", enable_random_boot_mode);
     // Short alias retained for existing/local testlists.
@@ -1029,6 +1073,11 @@ class riscv_instr_gen_config extends uvm_object;
     end
   endfunction
 
+  // Strict mode additionally rejects imported source Hypertest streams.
+  function bit restrict_dv_stores_to_data();
+    return restrict_store_to_data || restrict_generated_store_to_data;
+  endfunction
+
   virtual function void get_non_reserved_gpr();
   endfunction
 
@@ -1048,6 +1097,23 @@ class riscv_instr_gen_config extends uvm_object;
   virtual function void check_setting();
     bit support_64b;
     bit support_128b;
+    if (restrict_dv_stores_to_data()) begin
+      if (enable_misaligned_instr || (illegal_instr_ratio != 0)) begin
+        `uvm_fatal(`gfn,
+          "+restrict_store_to_data does not support raw illegal or misaligned instruction injection")
+      end
+      if (enable_vector_extension &&
+          (!use_vector_1_0 || vector_cfg.allow_illegal_vec_instr)) begin
+        `uvm_fatal(`gfn,
+          "+restrict_store_to_data requires legal Vector 1.0 instructions")
+      end
+      if ((cbo_zero_block_size != 0) &&
+          ((cbo_zero_block_size < 0) || (cbo_zero_block_size > 4096) ||
+           ((cbo_zero_block_size & (cbo_zero_block_size - 1)) != 0))) begin
+        `uvm_fatal(`gfn,
+          "+cbo_zero_block_size must be a power of two no larger than 4096")
+      end
+    end
     foreach (riscv_instr_pkg::supported_isa[i]) begin
       if (riscv_instr_pkg::supported_isa[i] inside {RV64I, RV64M, RV64A, RV64F, RV64D, RV64C,
                                                     RV64B, RV64ZBA, RV64ZBB, RV64ZBC,

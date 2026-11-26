@@ -171,6 +171,16 @@ class riscv_rand_instr_stream(riscv_instr_stream):
 
     def setup_allowed_instr(self, no_branch = 0, no_load_store = 1):
         self.allowed_instr = riscv_instr.basic_instr
+        if cfg.restrict_dv_store_to_data:
+            if not no_load_store:
+                raise ValueError('restrict_store_to_data: use a bounded memory stream')
+            # basic_instr is shared; a legacy caller may have extended it
+            # with memory instructions. Never inherit such unbounded stores.
+            memory_names = set()
+            for category in ('LOAD', 'STORE', 'AMO'):
+                memory_names.update(riscv_instr._flatten(riscv_instr.instr_category[category]))
+            self.allowed_instr = [name for name in riscv_instr._flatten(riscv_instr.basic_instr)
+                                  if name not in memory_names]
         if no_branch == 0:
             self.allowed_instr.extend(
                 riscv_instr.instr_category[riscv_instr_category_t.BRANCH.name])

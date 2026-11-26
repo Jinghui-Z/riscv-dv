@@ -242,6 +242,13 @@ class riscv_instr:
     @classmethod
     def pick_csr(cls):
         """Choose an architectural CSR address for a PyFlow instruction."""
+        if cfg.restrict_dv_store_to_data:
+            # Arbitrary SATP/status/vector-configuration changes invalidate
+            # the address assumptions of the bounded memory streams.
+            return int({privileged_mode_t.MACHINE_MODE: privileged_reg_t.MSCRATCH,
+                        privileged_mode_t.SUPERVISOR_MODE: privileged_reg_t.SSCRATCH,
+                        privileged_mode_t.USER_MODE: privileged_reg_t.USCRATCH}[
+                            cfg.init_privileged_mode])
         def as_int(value):
             try:
                 return int(value)

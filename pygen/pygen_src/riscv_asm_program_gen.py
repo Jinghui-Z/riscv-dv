@@ -30,7 +30,8 @@ from pygen_src.riscv_data_page_gen import riscv_data_page_gen
 from pygen_src.riscv_privileged_common_seq import riscv_privileged_common_seq
 from pygen_src.riscv_utils import (factory, is_directed_instr_stream_supported,
                                     is_random_directed_instr_stream_supported,
-                                    get_random_directed_instr_stream_names)
+                                    get_random_directed_instr_stream_names,
+                                    validate_restricted_directed_stream)
 rcs = import_module("pygen_src.target." + cfg.argv.target + ".riscv_core_setting")
 
 
@@ -144,6 +145,11 @@ class riscv_asm_program_gen:
         for hart in range(cfg.num_of_harts):
             # Starting point of data section
             self.gen_data_page_begin(hart)
+            if cfg.restrict_dv_store_to_data:
+                # ECALL's register snapshot used to overwrite _start. Keep
+                # diagnostics in writable storage, one slot per hart, even
+                # when random data-page generation is disabled.
+                self.gen_register_dump_data(hart)
             if not cfg.no_data_page:
                 # User data section
                 self.gen_data_page(hart)
@@ -561,13 +567,23 @@ class riscv_asm_program_gen:
         else:
             self.instr_stream.append(pkg_ins.indent + "ecall")
 
-    # Dump all GPR to the starting point of the program
+    # Dump all GPR to writable diagnostic storage in restricted mode. The
+    # legacy layout uses the starting point of the program.
     # TB can check the GPR value for this memory location to compare with expected value generated
     # by the ISA simulator. If the processor doesn't have a good tracer unit, it might not be
     # possible to compare the GPR value after each instruction execution.
-    def gen_register_dump(self, instr):
+    def gen_register_dump_data(self, hart):
+        self.instr_stream.extend([
+            '.pushsection .data,"aw",@progbits',
+            '.balign {}'.format(rcs.XLEN // 8),
+            '__dv_register_dump_{}:'.format(hart),
+            '.zero {}'.format(32 * (rcs.XLEN // 8)),
+            '.popsection'])
+
+    def gen_register_dump(self, instr, hart=0):
         # load base address
-        instr.append("la x{}, _start".format(cfg.gpr[0]))
+        label = '__dv_register_dump_{}'.format(hart) if cfg.restrict_dv_store_to_data else '_start'
+        instr.append("la x{}, {}".format(cfg.gpr[0], label))
         # Generate sw/sd instructions
         for i in range(32):
             if rcs.XLEN == 64:
@@ -907,7 +923,7 @@ class riscv_asm_program_gen:
     def gen_ecall_handler(self, hart):
         instr = []
         self.dump_perf_stats(instr)
-        self.gen_register_dump(instr)
+        self.gen_register_dump(instr, hart)
         instr.extend(("la x{}, write_tohost".format(cfg.scratch_reg),
                       "jalr x0, x{}, 0".format(cfg.scratch_reg)))
         self.gen_section(pkg_ins.get_label("ecall_handler", hart), instr)
@@ -1184,6 +1200,13 @@ class riscv_asm_program_gen:
         idx = 0
         if cfg.no_directed_instr:
             return
+        if cfg.restrict_dv_store_to_data:
+            # Validate before random selection and its best-effort exception
+            # handler: an explicitly unsafe request must never be skipped
+            # silently while reporting a protected test as successful.
+            for name, ratio in self.directed_instr_stream_ratio.items():
+                if int(ratio) > 0:
+                    validate_restricted_directed_stream(name)
         if cfg.enable_random_directed_instr:
             # The configured directed stream ratios are used as selection
             # weights.  The overall insertion density is controlled by the
@@ -1313,6 +1336,8 @@ class riscv_asm_program_gen:
                     new_instr_stream.hart = hart
                     new_instr_stream.label = "{}_{}".format(label, idx)
                     new_instr_stream.kernel_mode = kernel_mode
+                    if cfg.restrict_dv_store_to_data:
+                        new_instr_stream.preserve_runtime_regs = 1
                     new_instr_stream.randomize()
                     instr_stream.append(new_instr_stream)
                 else:

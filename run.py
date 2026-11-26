@@ -17,6 +17,7 @@ Regression script for RISC-V random instruction generator
 """
 
 import argparse
+import json
 import os
 import random
 import re
@@ -30,6 +31,8 @@ from scripts.ovpsim_log_to_trace_csv import *
 from scripts.whisper_log_trace_csv import *
 from scripts.sail_log_to_trace_csv import *
 from scripts.instr_trace_compare import *
+from scripts.hypertest_adapter import build_objects as build_hypertest_objects
+from scripts.hypertest_adapter import validate_spike as validate_hypertest_spike
 
 from types import SimpleNamespace
 
@@ -214,7 +217,7 @@ def get_iss_cmd(base_cmd, elf, log):
     return cmd
 
 
-def check_spike_log(log, test):
+def check_spike_log(log, test, hypertest_verified_lines=None):
     """Reject unexpected illegal-instruction traps in strict Spike runs."""
     allow_illegal = test.get('allow_iss_illegal_instr', 0)
     if (not isinstance(allow_illegal, (bool, int)) or
@@ -274,7 +277,8 @@ def check_spike_log(log, test):
     illegal_traps = [
         (line_idx, line.rstrip())
         for line_idx, line in enumerate(log_lines)
-        if 'exception trap_illegal_instruction' in line
+        if ('exception trap_illegal_instruction' in line and
+            line_idx not in (hypertest_verified_lines or set()))
     ]
     if not illegal_traps:
         return
@@ -327,6 +331,35 @@ def check_spike_log(log, test):
                 ','.join("0x{:03x}".format(value)
                          for value in sorted(allowed_csrs)))
             sys.exit(RET_FAIL)
+
+
+def check_hypertest_min_hits(log, test):
+    """Require a real Spike hit when random branches may skip injections."""
+    minimum = test.get('min_hypertest_hits', 0)
+    if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 0:
+        logging.error("Test %s has invalid min_hypertest_hits %r; expected "
+                      "a non-negative integer", test.get('test', '<unknown>'), minimum)
+        sys.exit(RET_FAIL)
+    if minimum == 0:
+        return
+    report_path = os.path.splitext(log)[0] + '.hypertest-validation.json'
+    try:
+        with open(report_path, encoding='utf-8') as report_file:
+            report = json.load(report_file)
+    except (OSError, ValueError) as exc:
+        logging.error("Cannot inspect Hypertest validation %s: %s", report_path, exc)
+        sys.exit(RET_FAIL)
+    hits = report.get('injection_hits')
+    if not isinstance(hits, dict) or any(
+            type(value) is not int or value < 0 for value in hits.values()):
+        logging.error("Hypertest validation %s has invalid injection_hits", report_path)
+        sys.exit(RET_FAIL)
+    actual = sum(hits.values())
+    if actual < minimum:
+        logging.error("Test %s executed only %d Hypertest injections in %s; "
+                      "minimum is %d", test.get('test', '<unknown>'),
+                      actual, log, minimum)
+        sys.exit(RET_FAIL)
 
 
 def do_compile(compile_cmd, test_list, core_setting_dir, cwd, ext_dir,
@@ -383,6 +416,26 @@ def run_csr_test(cmd_list, cwd, csr_file, isa, iterations, lsf_cmd,
         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
 
 
+def check_generator_sim_log(log_path):
+    """Fail on UVM failures even when the simulator exits with status zero."""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as log_file:
+            for line in log_file:
+                summary = re.match(r"^UVM_(WARNING|ERROR|FATAL)\s*:\s*(\d+)\s*$", line)
+                if summary:
+                    failed = int(summary.group(2)) != 0
+                else:
+                    failed = (re.match(r"^UVM_(WARNING|ERROR|FATAL)\b", line)
+                              is not None or "TEST FAILED" in line)
+                if failed:
+                    logging.error("Generator simulation failed in %s: %s",
+                                  log_path, line.strip())
+                    sys.exit(RET_FAIL)
+    except OSError as exc:
+        logging.error("Cannot read generator simulation log %s: %s", log_path, exc)
+        sys.exit(RET_FAIL)
+
+
 def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
                 csr_file,
                 isa, end_signature_addr, lsf_cmd, timeout_s, log_suffix,
@@ -409,6 +462,7 @@ def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
       debug_cmd             : Produce the debug cmd log without running
     """
     cmd_list = []
+    sim_log_paths = []
     sim_cmd = re.sub("<out>", os.path.abspath(output_dir), sim_cmd)
     sim_cmd = re.sub("<cwd>", cwd, sim_cmd)
     sim_cmd = re.sub("<sim_opts>", sim_opts, sim_cmd)
@@ -433,6 +487,9 @@ def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
                                                         batch_cnt))
                 for i in range(0, batch_cnt):
                     test_id = '{}_{}'.format(test['test'], i)
+                    sim_log_path = os.path.join(
+                        output_dir, "sim_{}_{}{}.log".format(
+                            test['test'], i, log_suffix))
                     rand_seed = seed_gen.get(test_id, i * batch_cnt)
                     if i < batch_cnt - 1:
                         test_cnt = batch_size
@@ -470,13 +527,25 @@ def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
                         if simulator == "pyflow":
                             test['gen_opts'] = re.sub("\+", "--",
                                                       test['gen_opts'])
-                            cmd += test['gen_opts']
+                            cmd += test['gen_opts'].strip() + " "
                         else:
-                            cmd += test['gen_opts']
+                            cmd += test['gen_opts'].strip() + " "
+                    if simulator != "pyflow" and "+hypertest_case_file=" not in cmd:
+                        # Full imported catalogs include terminal/platform tests.
+                        # Default mixing uses reviewed, executed cases; explicit
+                        # case names/files retain access to the complete catalog.
+                        restrictions = re.findall(
+                            r"(?:^|\s)\+restrict_store_to_data(?:=([01]))?(?=\s|$)", cmd)
+                        pool = ("case_names_restricted.txt" if restrictions and
+                                restrictions[-1] != "0" else "case_names_random.txt")
+                        cmd += " +hypertest_case_file={} ".format(
+                            os.path.join(cwd, "src/hypertest", pool))
                     if not re.search("c", isa):
                         cmd += "+disable_compressed_instr=1 "
                     if lsf_cmd:
                         cmd_list.append(cmd)
+                        if simulator != "pyflow":
+                            sim_log_paths.append(sim_log_path)
                     else:
                         logging.info(
                             "Running {}, batch {}/{}, test_cnt:{}".format(
@@ -484,6 +553,8 @@ def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
                         run_cmd(cmd, timeout_s,
                                 check_return_code=check_return_code,
                                 debug_cmd=debug_cmd)
+                        if simulator != "pyflow" and not debug_cmd:
+                            check_generator_sim_log(sim_log_path)
     if sim_seed:
         with open(('{}/seed.yaml'.format(os.path.abspath(output_dir))),
                   'w') as outfile:
@@ -492,6 +563,9 @@ def do_simulate(sim_cmd, simulator, test_list, cwd, sim_opts, seed_gen,
         run_parallel_cmd(cmd_list, timeout_s,
                          check_return_code=check_return_code,
                          debug_cmd=debug_cmd)
+        if simulator != "pyflow" and not debug_cmd:
+            for sim_log_path in sim_log_paths:
+                check_generator_sim_log(sim_log_path)
 
 
 def gen(test_list, argv, output_dir, cwd):
@@ -596,7 +670,16 @@ def gcc_compile(test_list, output_dir, isa, mabi, opts, debug_cmd):
             if not re.search('mabi', cmd):
                 cmd += (" -mabi={}".format(mabi))
             logging.info("Compiling {}".format(asm))
-            run_cmd_output(cmd.split(), debug_cmd=debug_cmd)
+            gcc_command = shlex.split(cmd)
+            final_isa = next((arg.split("=", 1)[1] for arg in reversed(gcc_command)
+                              if arg.startswith("-march=")), test_isa)
+            final_abi = next((arg.split("=", 1)[1] for arg in reversed(gcc_command)
+                              if arg.startswith("-mabi=")), mabi)
+            hypertest_objects = build_hypertest_objects(
+                cwd, asm, gcc_command[0], output_dir, final_isa, final_abi,
+                debug_cmd=debug_cmd,
+                extra_cflags=shlex.split(opts + " " + test.get('gcc_opts', '')))
+            run_cmd_output(gcc_command + hypertest_objects, debug_cmd=debug_cmd)
             # Convert the ELF to plain binary, used in RTL sim
             logging.info("Converting to {}".format(binary))
             cmd = ("{} -O binary {} {}".format(
@@ -605,7 +688,7 @@ def gcc_compile(test_list, output_dir, isa, mabi, opts, debug_cmd):
 
 
 def run_assembly(asm_test, iss_yaml, isa, priv, mabi, gcc_opts, iss_opts,
-                 output_dir, setting_dir, debug_cmd):
+                 output_dir, setting_dir, debug_cmd, timeout_s=10):
     """Run a directed assembly test with ISS
 
     Args:
@@ -643,9 +726,19 @@ def run_assembly(asm_test, iss_yaml, isa, priv, mabi, gcc_opts, iss_opts,
          -T{}/scripts/link.ld {} -o {} ".format(
         get_env_var("RISCV_GCC", debug_cmd=debug_cmd), asm_test, cwd,
         cwd, gcc_opts, elf))
-    cmd += (" -march={}".format(isa))
-    cmd += (" -mabi={}".format(mabi))
-    run_cmd_output(cmd.split(), debug_cmd=debug_cmd)
+    if not re.search(r"(?:^|\s)-march=", cmd):
+        cmd += (" -march={}".format(isa))
+    if not re.search(r"(?:^|\s)-mabi=", cmd):
+        cmd += (" -mabi={}".format(mabi))
+    gcc_command = shlex.split(cmd)
+    final_isa = next((arg.split("=", 1)[1] for arg in reversed(gcc_command)
+                      if arg.startswith("-march=")), isa)
+    final_abi = next((arg.split("=", 1)[1] for arg in reversed(gcc_command)
+                      if arg.startswith("-mabi=")), mabi)
+    hypertest_objects = build_hypertest_objects(
+        cwd, asm_test, gcc_command[0], output_dir, final_isa, final_abi,
+        debug_cmd=debug_cmd, extra_cflags=shlex.split(gcc_opts))
+    run_cmd_output(gcc_command + hypertest_objects, debug_cmd=debug_cmd)
     # Convert the ELF to plain binary, used in RTL sim
     logging.info("Converting to {}".format(binary))
     cmd = ("{} -O binary {} {}".format(
@@ -661,14 +754,17 @@ def run_assembly(asm_test, iss_yaml, isa, priv, mabi, gcc_opts, iss_opts,
                                   debug_cmd)
         logging.info("[{}] Running ISS simulation: {}".format(iss, elf))
         cmd = get_iss_cmd(base_cmd, elf, log)
-        run_cmd(cmd, 10, debug_cmd=debug_cmd)
+        run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
+        if iss == "spike" and not debug_cmd and hypertest_objects:
+            checked_lines = validate_hypertest_spike(log, elf, asm_test)
+            check_spike_log(log, {}, checked_lines)
         logging.info("[{}] Running ISS simulation: {} ...done".format(iss, elf))
     if len(iss_list) == 2:
         compare_iss_log(iss_list, log_list, report)
 
 
 def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, priv, mabi, gcc_opts,
-                          iss, output_dir, setting_dir, debug_cmd):
+                          iss, output_dir, setting_dir, debug_cmd, timeout_s=10):
     """Run a directed assembly test from a directory with spike
 
     Args:
@@ -691,7 +787,7 @@ def run_assembly_from_dir(asm_test_dir, iss_yaml, isa, priv, mabi, gcc_opts,
         for asm_file in asm_list:
             run_assembly(asm_file, iss_yaml, isa, priv, mabi, gcc_opts, iss,
                          output_dir,
-                         setting_dir, debug_cmd)
+                         setting_dir, debug_cmd, timeout_s)
             if "," in iss:
                 report = ("{}/iss_regr.log".format(output_dir)).rstrip()
                 save_regr_report(report)
@@ -833,8 +929,14 @@ def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
                         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
                     else:
                         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
-                    if iss == "spike" and strict_spike_log and not debug_cmd:
-                        check_spike_log(log, test)
+                    if iss == "spike" and not debug_cmd:
+                        minimum = test.get('min_hypertest_hits', 0)
+                        if strict_spike_log or minimum:
+                            checked_lines = validate_hypertest_spike(
+                                log, elf, prefix + ".S", require_all=False)
+                            if strict_spike_log:
+                                check_spike_log(log, test, checked_lines)
+                        check_hypertest_min_hits(log, test)
                     logging.debug(cmd)
 
 
@@ -1200,13 +1302,14 @@ def main():
                     run_assembly_from_dir(full_path, args.iss_yaml, args.isa,
                                           args.priv, args.mabi,
                                           args.gcc_opts, args.iss, output_dir,
-                                          args.core_setting_dir, args.debug)
+                                          args.core_setting_dir, args.debug,
+                                          args.iss_timeout)
                 # path_asm_test is an assembly file
                 elif os.path.isfile(full_path) or args.debug:
                     run_assembly(full_path, args.iss_yaml, args.isa, args.priv,
                                  args.mabi, args.gcc_opts,
                                  args.iss, output_dir, args.core_setting_dir,
-                                 args.debug)
+                                 args.debug, args.iss_timeout)
                 else:
                     logging.error('{} does not exist'.format(full_path))
                     sys.exit(RET_FAIL)
@@ -1277,7 +1380,7 @@ def main():
                     gcc_opts = args.gcc_opts
                     gcc_opts += test_entry.get('gcc_opts', '')
                     path_asm_test = os.path.expanduser(
-                        test_entry.get('asm_test'))
+                        test_entry.get('asm_test').replace('<riscv_dv_root>', cwd))
                     if path_asm_test:
                         # path_asm_test is a directory
                         if os.path.isdir(path_asm_test):
@@ -1286,13 +1389,14 @@ def main():
                                                   gcc_opts, args.iss,
                                                   output_dir,
                                                   args.core_setting_dir,
-                                                  args.debug)
+                                                  args.debug, args.iss_timeout)
                         # path_asm_test is an assembly file
                         elif os.path.isfile(path_asm_test):
                             run_assembly(path_asm_test, args.iss_yaml, args.isa,
                                          args.priv, args.mabi, gcc_opts,
                                          args.iss, output_dir,
-                                         args.core_setting_dir, args.debug)
+                                         args.core_setting_dir, args.debug,
+                                         args.iss_timeout)
                         else:
                             if not args.debug:
                                 logging.error(

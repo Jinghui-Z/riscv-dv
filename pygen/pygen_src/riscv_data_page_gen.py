@@ -54,6 +54,22 @@ class riscv_data_page_gen:
         else:
             self.mem_region_setting = cfg.mem_region
         for i in range(len(self.mem_region_setting)):
+            if cfg.restrict_dv_store_to_data:
+                region = self.mem_region_setting[i]
+                label = region.name if amo else pkg_ins.hart_prefix(hart_id) + region.name
+                section = '.pushsection' if cfg.use_push_data_section else '.section'
+                size = int(region.size_in_bytes)
+                if size <= 0:
+                    raise ValueError('restrict_store_to_data: data region must be nonempty')
+                self.data_page_str.extend([
+                    '{} .dv_store_data.{},"aw",@progbits'.format(section, label),
+                    '.balign 4096', '{}:'.format(label)])
+                for offset in range(0, size, 32):
+                    data = self.gen_data(offset, pattern, min(32, size - offset), [])
+                    self.data_page_str.append('.byte ' + ', '.join(str(value) for value in data))
+                if cfg.use_push_data_section:
+                    self.data_page_str.append('.popsection')
+                continue
             logging.info("Generate data section: {} size:0x{} xwr:0x{}".format(
                          self.mem_region_setting[i].name,
                          self.mem_region_setting[i].size_in_bytes,

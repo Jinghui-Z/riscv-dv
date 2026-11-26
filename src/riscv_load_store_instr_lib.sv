@@ -117,6 +117,40 @@ class riscv_load_store_base_instr_stream extends riscv_mem_access_stream;
     super.post_randomize();
   endfunction
 
+  // The start-byte constraint is insufficient for an unaligned SH/SW/SD at
+  // the end of a page. Keep only instructions whose entire memory operand
+  // fits; do not disable otherwise legal unaligned accesses.
+  virtual function int scalar_access_bytes(riscv_instr_name_t instr_name);
+    case (instr_name)
+      LB, LBU, SB, C_LBU, C_SB: return 1;
+      LH, LHU, SH, C_LH, C_LHU, C_SH: return 2;
+      LW, LWU, SW, FLW, FSW, C_LW, C_SW, C_LWSP, C_SWSP,
+      C_FLW, C_FSW, C_FLWSP, C_FSWSP: return 4;
+      LD, SD, FLD, FSD, C_LD, C_SD, C_LDSP, C_SDSP,
+      C_FLD, C_FSD, C_FLDSP, C_FSDSP: return 8;
+      default: begin
+        `uvm_fatal(`gfn, $sformatf(
+          "restrict_store_to_data: no scalar access width for %0s", instr_name.name()))
+        return 0;
+      end
+    endcase
+  endfunction
+
+  virtual function void restrict_access_width(int addr_offset);
+    if (!cfg.restrict_dv_stores_to_data()) return;
+    if ((addr_offset < 0) || (addr_offset >= max_load_store_offset)) begin
+      `uvm_fatal(`gfn, "restrict_store_to_data: scalar address outside its data region")
+    end
+    for (int j = allowed_instr.size() - 1; j >= 0; j--) begin
+      if (scalar_access_bytes(allowed_instr[j]) > max_load_store_offset - addr_offset) begin
+        allowed_instr.delete(j);
+      end
+    end
+    // Some compressed-only choices replace the normal candidate list. A
+    // byte access is still valid if that compressed access crosses the end.
+    if (allowed_instr.size() == 0) allowed_instr = {LB, LBU, SB};
+  endfunction
+
   // Generate each load/store instruction
   virtual function void gen_load_store_instr();
     bit enable_compressed_load_store, enable_zcb;
@@ -209,6 +243,7 @@ class riscv_load_store_base_instr_stream extends riscv_mem_access_stream;
            end
         end
       end
+      restrict_access_width(addr[i]);
       instr = riscv_instr::get_load_store_instr(allowed_instr);
       instr.has_rs1 = 0;
       instr.has_imm = 0;
@@ -307,6 +342,18 @@ class riscv_cbo_instr_stream extends riscv_mem_access_stream;
       cbo_instr = {CBO_INVAL, CBO_CLEAN, CBO_FLUSH};
     end
     if (cfg.enable_zicboz_extension) begin
+      if (cfg.restrict_dv_stores_to_data()) begin
+        // The restricted data-page emitter aligns every region to 4 KiB.
+        // The platform's actual zeroing granule must be supplied explicitly.
+        if ((cfg.cbo_zero_block_size == 0) || (cfg.cbo_zero_block_size > 4096) ||
+            ((cfg.cbo_zero_block_size & (cfg.cbo_zero_block_size - 1)) != 0)) begin
+          `uvm_fatal(`gfn, {"restrict_store_to_data: CBO.ZERO requires ",
+            "+cbo_zero_block_size=<platform bytes>, a power of two no larger than 4096"})
+        end
+        if (data_page[data_page_id].size_in_bytes < cfg.cbo_zero_block_size) begin
+          `uvm_fatal(`gfn, "restrict_store_to_data: data region is smaller than a CBO.ZERO block")
+        end
+      end
       cbo_instr.push_back(CBO_ZERO);
     end
     if (cbo_instr.size() == 0) begin
@@ -442,6 +489,15 @@ class riscv_multi_page_load_store_instr_stream extends riscv_mem_access_stream;
       load_store_instr_stream[i].max_instr_cnt = 10;
       load_store_instr_stream[i].cfg = cfg;
       load_store_instr_stream[i].hart = hart;
+      if (cfg.restrict_dv_stores_to_data()) begin
+        // The parent's page IDs describe its own user/kernel memory pool.
+        // A nested factory replacement has not established these bounds.
+        if (load_store_instr_stream[i].get_type_name() != "riscv_load_store_stress_instr_stream") begin
+          `uvm_fatal(`gfn, {"restrict_store_to_data: unvalidated nested load/store stream ",
+            load_store_instr_stream[i].get_type_name()})
+        end
+        load_store_instr_stream[i].kernel_mode = kernel_mode;
+      end
       load_store_instr_stream[i].sp_c.constraint_mode(0);
       // Make sure each load/store sequence doesn't override the rs1 of other sequences.
       foreach(rs1_reg[j]) begin
@@ -504,6 +560,14 @@ class riscv_load_store_rand_addr_instr_stream extends riscv_load_store_base_inst
 
   `uvm_object_utils(riscv_load_store_rand_addr_instr_stream)
   `uvm_object_new
+
+  function void pre_randomize();
+    if (cfg.restrict_dv_stores_to_data()) begin
+      `uvm_fatal(`gfn, {"restrict_store_to_data does not permit ",
+        "riscv_load_store_rand_addr_instr_stream: its addresses are outside allocated data regions"})
+    end
+    super.pre_randomize();
+  endfunction
 
    virtual function void randomize_offset();
     int offset_, addr_;
@@ -653,7 +717,26 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
       // TODO: Support different index address for each element
       add_init_index_vector_instr();
     end
+    if (cfg.restrict_dv_stores_to_data() && (address_mode != INDEXED)) begin
+      add_restore_vector_state_instr();
+    end
     super.post_randomize();
+  endfunction
+
+  // The footprint is computed from cfg.vector_cfg. Establish that exact
+  // VL/VTYPE immediately before the memory operation, after mixed VSET/CSR
+  // instructions; VSETVLI also resets vstart. Indexed accesses already do
+  // this in add_init_index_vector_instr(), with their index initialization.
+  virtual function void add_restore_vector_state_instr();
+    foreach (instr_list[i]) begin
+      if (instr_list[i] == load_store_instr) begin
+        instr_list.insert(i, get_init_gpr_instr(cfg.gpr[0], cfg.vector_cfg.vl));
+        instr_list.insert(i + 1, get_vsetvli_instr(cfg.vector_cfg.vtype.vsew,
+            cfg.vector_cfg.vtype.fractional_lmul, cfg.vector_cfg.vtype.vlmul, cfg.gpr[0]));
+        return;
+      end
+    end
+    `uvm_fatal(`gfn, "Cannot locate vector memory instruction to restore its bounded vector state")
   endfunction
 
   virtual function bit [2:0] lmul_encoding(bit fractional, int magnitude);
@@ -749,6 +832,10 @@ class riscv_vector_load_store_instr_stream extends riscv_mem_access_stream;
     int ss = address_span();
     int element_bytes = data_element_bytes();
     bit success;
+
+    if (cfg.restrict_dv_stores_to_data() && ((ss <= 0) || (element_bytes <= 0))) begin
+      `uvm_fatal(`gfn, "restrict_store_to_data: invalid vector memory footprint")
+    end
 
     repeat (10) begin
       max_load_store_addr = data_page[data_page_id].size_in_bytes - ss;
