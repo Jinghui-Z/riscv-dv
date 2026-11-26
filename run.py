@@ -33,6 +33,7 @@ from scripts.sail_log_to_trace_csv import *
 from scripts.instr_trace_compare import *
 from scripts.hypertest_adapter import build_objects as build_hypertest_objects
 from scripts.hypertest_adapter import validate_spike as validate_hypertest_spike
+from scripts.process_switch_validation import validate_spike as validate_process_switch_spike
 
 from types import SimpleNamespace
 
@@ -935,6 +936,13 @@ def iss_sim(test_list, output_dir, iss_list, iss_yaml, iss_opts,
                     else:
                         run_cmd(cmd, timeout_s, debug_cmd=debug_cmd)
                     if iss == "spike" and not debug_cmd:
+                        try:
+                            validate_process_switch_spike(
+                                log, elf, prefix + ".S",
+                                minimum_hits=test.get('min_process_switch_hits', 0))
+                        except RuntimeError as exc:
+                            logging.error("Process-switch validation failed: %s", exc)
+                            sys.exit(RET_FAIL)
                         minimum = test.get('min_hypertest_hits', 0)
                         if strict_spike_log or minimum:
                             checked_lines = validate_hypertest_spike(

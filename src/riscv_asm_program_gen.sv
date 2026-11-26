@@ -2162,6 +2162,7 @@ class riscv_asm_program_gen extends uvm_object;
         "riscv_mem_region_stress_test", "riscv_load_store_shared_mem_stream",
         "riscv_lr_sc_instr_stream", "riscv_amo_instr_stream", "riscv_cbo_instr_stream",
         "riscv_vector_load_store_instr_stream",
+        "riscv_process_switch_stream",
         "riscv_hypertest_sv48_canonical_stream",
         "riscv_hypertest_sv48_canonical_x_deny_stream"})) begin
       `uvm_fatal(`gfn, $sformatf(
@@ -2198,6 +2199,10 @@ class riscv_asm_program_gen extends uvm_object;
       // random_directed_instr_ratio knob.
       foreach (directed_instr_stream_ratio[instr_stream_name]) begin
         if (directed_instr_stream_ratio[instr_stream_name] == 0) continue;
+        // This stream temporarily owns SATP/MTVEC and enters S-mode; it can
+        // only run inside the ordinary M-mode main/subprogram sequence.
+        if ((instr_stream_name == "riscv_process_switch_stream") &&
+            (kernel_mode || is_debug_program)) continue;
         `ifdef DSIM
           // DSim cannot randomize the dynamic arrays used by loop streams.
           if (uvm_is_match("*loop*", instr_stream_name)) continue;
@@ -2273,6 +2278,8 @@ class riscv_asm_program_gen extends uvm_object;
       return;
     end
     foreach(directed_instr_stream_ratio[instr_stream_name]) begin
+      if ((instr_stream_name == "riscv_process_switch_stream") &&
+          (kernel_mode || is_debug_program)) continue;
       instr_insert_cnt = original_instr_cnt * directed_instr_stream_ratio[instr_stream_name] / 1000;
       if(instr_insert_cnt <= min_insert_cnt) begin
         instr_insert_cnt = min_insert_cnt;

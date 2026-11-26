@@ -1839,6 +1839,7 @@ package riscv_instr_pkg;
   `include "riscv_loop_instr.sv"
   `include "riscv_directed_instr_lib.sv"
   `include "riscv_hypertest_instr_lib.sv"
+  `include "riscv_process_switch_instr_lib.sv"
   `include "riscv_load_store_instr_lib.sv"
   `include "riscv_amo_instr_lib.sv"
 
